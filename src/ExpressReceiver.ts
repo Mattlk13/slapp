@@ -1,15 +1,14 @@
-import { EventEmitter } from 'events';
-import { Receiver, ReceiverEvent, ReceiverAckTimeoutError } from './types';
-import { createServer, Server, Agent } from 'http';
-import { SecureContextOptions } from 'tls';
-import express, { Request, Response, Application, RequestHandler, NextFunction } from 'express';
-import axios, { AxiosInstance } from 'axios';
+import { AnyMiddlewareArgs, Receiver, ReceiverEvent } from './types';
+import { createServer, Server } from 'http';
+import express, { Request, Response, Application, RequestHandler, Router } from 'express';
 import rawBody from 'raw-body';
 import querystring from 'querystring';
 import crypto from 'crypto';
 import tsscmp from 'tsscmp';
-import { ErrorCode, errorWithCode } from './errors';
+import App from './App';
+import { ReceiverAuthenticityError, ReceiverMultipleAckError } from './errors';
 import { Logger, ConsoleLogger } from '@slack/logger';
+import { InstallProvider, StateStore, InstallationStore, CallbackOptions } from '@slack/oauth';
 
 // TODO: we throw away the key names for endpoints, so maybe we should use this interface. is it better for migrations?
 // if that's the reason, let's document that with a comment.
@@ -19,96 +18,175 @@ export interface ExpressReceiverOptions {
   endpoints?: string | {
     [endpointType: string]: string;
   };
-  agent?: Agent;
-  clientTls?: Pick<SecureContextOptions, 'pfx' | 'key' | 'passphrase' | 'cert' | 'ca'>;
+  processBeforeResponse?: boolean;
+  clientId?: string;
+  clientSecret?: string;
+  stateSecret?: string; // ClearStateStoreOptions['secret']; // required when using default stateStore
+  installationStore?: InstallationStore; // default MemoryInstallationStore
+  scopes?: string | string[];
+  installerOptions?: InstallerOptions;
+}
+
+// Additional Installer Options
+interface InstallerOptions {
+  stateStore?: StateStore; // default ClearStateStore
+  authVersion?: 'v1' | 'v2'; // default 'v2'
+  metadata?: string;
+  installPath?: string;
+  redirectUriPath?: string;
+  callbackOptions?: CallbackOptions;
+  userScopes?: string | string[];
 }
 
 /**
  * Receives HTTP requests with Events, Slash Commands, and Actions
  */
-export default class ExpressReceiver extends EventEmitter implements Receiver {
+export default class ExpressReceiver implements Receiver {
 
   /* Express app */
   public app: Application;
 
   private server: Server;
-
-  private axios: AxiosInstance;
+  private bolt: App | undefined;
+  private logger: Logger;
+  private processBeforeResponse: boolean;
+  public router: Router;
+  public installer: InstallProvider | undefined = undefined;
 
   constructor({
     signingSecret = '',
     logger = new ConsoleLogger(),
     endpoints = { events: '/slack/events' },
-    agent = undefined,
-    clientTls = undefined,
+    processBeforeResponse = false,
+    clientId = undefined,
+    clientSecret = undefined,
+    stateSecret = undefined,
+    installationStore = undefined,
+    scopes = undefined,
+    installerOptions = {},
   }: ExpressReceiverOptions) {
-    super();
-
     this.app = express();
-    this.app.use(this.errorHandler.bind(this));
     // TODO: what about starting an https server instead of http? what about other options to create the server?
     this.server = createServer(this.app);
-    this.axios = axios.create(Object.assign(
-      {
-        httpAgent: agent,
-        httpsAgent: agent,
-      },
-      clientTls,
-    ));
 
     const expressMiddleware: RequestHandler[] = [
-      verifySignatureAndParseBody(logger, signingSecret),
+      verifySignatureAndParseRawBody(logger, signingSecret),
       respondToSslCheck,
       respondToUrlVerification,
       this.requestHandler.bind(this),
     ];
 
-    const endpointList: string[] = typeof endpoints === 'string' ? [endpoints] : Object.values(endpoints);
+    this.processBeforeResponse = processBeforeResponse;
+    this.logger = logger;
+    const endpointList = typeof endpoints === 'string' ? [endpoints] : Object.values(endpoints);
+    this.router = Router();
     for (const endpoint of endpointList) {
-      this.app.post(endpoint, ...expressMiddleware);
+      this.router.post(endpoint, ...expressMiddleware);
     }
+
+    if (
+      clientId !== undefined
+      && clientSecret !== undefined
+      && (stateSecret !== undefined || installerOptions.stateStore !== undefined)
+    ) {
+
+      this.installer = new InstallProvider({
+        clientId,
+        clientSecret,
+        stateSecret,
+        installationStore,
+        stateStore: installerOptions.stateStore,
+        authVersion: installerOptions.authVersion!,
+      });
+    }
+
+    // Add OAuth routes to receiver
+    if (this.installer !== undefined) {
+      const redirectUriPath = installerOptions.redirectUriPath === undefined ?
+        '/slack/oauth_redirect' : installerOptions.redirectUriPath;
+      this.router.use(redirectUriPath, async (req, res) => {
+        await this.installer!.handleCallback(req, res, installerOptions.callbackOptions);
+      });
+
+      const installPath = installerOptions.installPath === undefined ?
+      '/slack/install' : installerOptions.installPath;
+      this.router.get(installPath, async (_req, res, next) => {
+        try {
+          const url = await this.installer!.generateInstallUrl({
+            metadata: installerOptions.metadata,
+            scopes: scopes!,
+            userScopes: installerOptions.userScopes,
+          });
+          res.send(`<a href=${url}><img alt=""Add to Slack"" height="40" width="139"
+              src="https://platform.slack-edge.com/img/add_to_slack.png"
+              srcset="https://platform.slack-edge.com/img/add_to_slack.png 1x,
+              https://platform.slack-edge.com/img/add_to_slack@2x.png 2x" /></a>`);
+        } catch (error) {
+          next(error);
+        }
+      });
+    }
+
+    this.app.use(this.router);
   }
 
-  private requestHandler(req: Request, res: Response): void {
-    let timer: NodeJS.Timer | undefined = setTimeout(
-      () => {
-        this.emit('error', receiverAckTimeoutError(
-          'An incoming event was not acknowledged before the timeout. ' +
-          'Ensure that the ack() argument is called in your listeners.',
-        ));
-        timer = undefined;
-      },
-      2800,
-    );
-    const event: ReceiverEvent = {
-      body: req.body as { [key: string]: any },
-      ack: (response: any): void => {
-        // TODO: if app tries acknowledging more than once, emit a warning
-        if (timer !== undefined) {
-          clearTimeout(timer);
-          timer = undefined;
+  private async requestHandler(req: Request, res: Response): Promise<void> {
+    let isAcknowledged = false;
+    setTimeout(() => {
+      if (!isAcknowledged) {
+        this.logger.error('An incoming event was not acknowledged within 3 seconds. ' +
+            'Ensure that the ack() argument is called in a listener.');
+      }
+    // tslint:disable-next-line: align
+    }, 3001);
 
-          if (!response) res.send('');
-          if (typeof response === 'string') {
+    let storedResponse = undefined;
+    const event: ReceiverEvent = {
+      body: req.body,
+      ack: async (response): Promise<void> => {
+        this.logger.debug('ack() begin');
+        if (isAcknowledged) {
+          throw new ReceiverMultipleAckError();
+        }
+        isAcknowledged = true;
+        if (this.processBeforeResponse) {
+          if (!response) {
+            storedResponse = '';
+          } else {
+            storedResponse = response;
+          }
+          this.logger.debug('ack() response stored');
+        } else {
+          if (!response) {
+            res.send('');
+          } else if (typeof response === 'string') {
             res.send(response);
           } else {
             res.json(response);
           }
+          this.logger.debug('ack() response sent');
         }
       },
-      respond: undefined,
     };
 
-    if (req.body && req.body.response_url) {
-      event.respond = (response): void => {
-        this.axios.post(req.body.response_url, response)
-          .catch((e) => {
-            this.emit('error', e);
-          });
-      };
+    try {
+      await this.bolt?.processEvent(event);
+      if (storedResponse !== undefined) {
+        if (typeof storedResponse === 'string') {
+          res.send(storedResponse);
+        } else {
+          res.json(storedResponse);
+        }
+        this.logger.debug('stored response sent');
+      }
+    } catch (err) {
+      res.status(500).send();
+      throw err;
     }
+  }
 
-    this.emit('message', event);
+  public init(bolt: App): void {
+    this.bolt = bolt;
   }
 
   // TODO: the arguments should be defined as the arguments of Server#listen()
@@ -143,15 +221,9 @@ export default class ExpressReceiver extends EventEmitter implements Receiver {
       });
     });
   }
-
-  private errorHandler(err: any, _req: Request, _res: Response, next: NextFunction): void {
-    this.emit('error', err);
-    // Forward to express' default error handler (which knows how to print stack traces in development)
-    next(err);
-  }
 }
 
-const respondToSslCheck: RequestHandler = (req, res, next) => {
+export const respondToSslCheck: RequestHandler = (req, res, next) => {
   if (req.body && req.body.ssl_check) {
     res.send();
     return;
@@ -159,7 +231,7 @@ const respondToSslCheck: RequestHandler = (req, res, next) => {
   next();
 };
 
-const respondToUrlVerification: RequestHandler = (req, res, next) => {
+export const respondToUrlVerification: RequestHandler = (req, res, next) => {
   if (req.body && req.body.type && req.body.type === 'url_verification') {
     res.json({ challenge: req.body.challenge });
     return;
@@ -172,70 +244,69 @@ const respondToUrlVerification: RequestHandler = (req, res, next) => {
  * - Verify the request signature
  * - Parse request.body and assign the successfully parsed object to it.
  */
-export function verifySignatureAndParseBody(
+export function verifySignatureAndParseRawBody(
   logger: Logger,
   signingSecret: string,
 ): RequestHandler {
-  return async (req, _res, next) => {
+  return async (req, res, next) => {
+
+    let stringBody: string;
+    // On some environments like GCP (Google Cloud Platform),
+    // req.body can be pre-parsed and be passed as req.rawBody here
+    const preparsedRawBody: any = (req as any).rawBody;
+    if (preparsedRawBody !== undefined) {
+      stringBody = preparsedRawBody.toString();
+    } else {
+      stringBody = (await rawBody(req)).toString();
+    }
+
+    // *** Parsing body ***
+    // As the verification passed, parse the body as an object and assign it to req.body
+    // Following middlewares can expect `req.body` is already a parsed one.
+
     try {
-      // *** Request verification ***
-      let stringBody: string;
-      // On some environments like GCP (Google Cloud Platform),
-      // req.body can be pre-parsed and be passed as req.rawBody here
-      const preparsedRawBody: any = (req as any).rawBody;
-      if (preparsedRawBody !== undefined) {
-        stringBody = preparsedRawBody.toString();
-      } else {
-        stringBody = (await rawBody(req)).toString();
-      }
-
-      const {
-        'x-slack-signature': signature,
-        'x-slack-request-timestamp': requestTimestamp,
-        'content-type': contentType,
-      } = req.headers;
-
-      await verifyRequestSignature(
-        signingSecret,
-        stringBody,
-        signature as string | undefined,
-        requestTimestamp as string | undefined,
-      );
-
-      // *** Parsing body ***
-      // As the verification passed, parse the body as an object and assign it to req.body
-      // Following middlewares can expect `req.body` is already a parsed one.
-
       // This handler parses `req.body` or `req.rawBody`(on Google Could Platform)
       // and overwrites `req.body` with the parsed JS object.
-      req.body = parseRequestBody(logger, stringBody, contentType);
-
-      return next();
+      req.body = verifySignatureAndParseBody(signingSecret, stringBody, req.headers);
     } catch (error) {
-      return next(error);
+      if (error) {
+        if (error instanceof ReceiverAuthenticityError) {
+          logError(logger, 'Request verification failed', error);
+          return res.status(401).send();
+        }
+
+        logError(logger, 'Parsing request body failed', error);
+        return res.status(400).send();
+      }
     }
+
+    return next();
   };
 }
 
-// TODO: this should be imported from another package
-async function verifyRequestSignature(
-  signingSecret: string,
-  body: string,
-  signature: string | undefined,
-  requestTimestamp: string | undefined,
-): Promise<void> {
+function logError(logger: Logger, message: string, error: any): void {
+  const logMessage = ('code' in error)
+    ? `${message} (code: ${error.code}, message: ${error.message})`
+    : `${message} (error: ${error})`;
+  logger.warn(logMessage);
+}
+
+function verifyRequestSignature(
+    signingSecret: string,
+    body: string,
+    signature: string | undefined,
+    requestTimestamp: string | undefined,
+): void {
   if (signature === undefined || requestTimestamp === undefined) {
-    throw errorWithCode(
-      'Slack request signing verification failed. Some headers are missing.',
-      ErrorCode.ExpressReceiverAuthenticityError,
+    throw new ReceiverAuthenticityError(
+        'Slack request signing verification failed. Some headers are missing.',
     );
   }
 
   const ts = Number(requestTimestamp);
   if (isNaN(ts)) {
-    throw errorWithCode(
-      'Slack request signing verification failed. Timestamp is invalid.',
-      ErrorCode.ExpressReceiverAuthenticityError,
+    throw new ReceiverAuthenticityError(
+        'Slack request signing verification failed. Timestamp is invalid.',
     );
   }
 
@@ -244,9 +315,8 @@ async function verifyRequestSignature(
   const fiveMinutesAgo = Math.floor(Date.now() / 1000) - (60 * 5);
 
   if (ts < fiveMinutesAgo) {
-    throw errorWithCode(
-      'Slack request signing verification failed. Timestamp is too old.',
-      ErrorCode.ExpressReceiverAuthenticityError,
+    throw new ReceiverAuthenticityError(
+        'Slack request signing verification failed. Timestamp is too old.',
     );
   }
 
@@ -255,41 +325,52 @@ async function verifyRequestSignature(
   hmac.update(`${version}:${ts}:${body}`);
 
   if (!tsscmp(hash, hmac.digest('hex'))) {
-    throw errorWithCode(
-      'Slack request signing verification failed. Signature mismatch.',
-      ErrorCode.ExpressReceiverAuthenticityError,
+    throw new ReceiverAuthenticityError(
+        'Slack request signing verification failed. Signature mismatch.',
     );
   }
 }
 
+/**
+ * This request handler has two responsibilities:
+ * - Verify the request signature
+ * - Parse request.body and assign the successfully parsed object to it.
+ */
+function verifySignatureAndParseBody(
+    signingSecret: string,
+    body: string,
+    headers: Record<string, any>,
+): AnyMiddlewareArgs['body'] {
+  // *** Request verification ***
+  const {
+    'x-slack-signature': signature,
+    'x-slack-request-timestamp': requestTimestamp,
+    'content-type': contentType,
+  } = headers;
+
+  verifyRequestSignature(
+      signingSecret,
+      body,
+      signature,
+      requestTimestamp,
+  );
+
+  return parseRequestBody(body, contentType);
+}
+
 function parseRequestBody(
-  logger: Logger,
-  stringBody: string,
-  contentType: string | undefined): any {
+    stringBody: string,
+    contentType: string | undefined,
+): any {
   if (contentType === 'application/x-www-form-urlencoded') {
     const parsedBody = querystring.parse(stringBody);
+
     if (typeof parsedBody.payload === 'string') {
       return JSON.parse(parsedBody.payload);
     }
+
     return parsedBody;
   }
 
-  if (contentType === 'application/json') {
-    return JSON.parse(stringBody);
-  }
-
-  logger.warn(`Unexpected content-type detected: ${contentType}`);
-  try {
-    // Parse this body anyway
-    return JSON.parse(stringBody);
-  } catch (e) {
-    logger.error(`Failed to parse body as JSON data for content-type: ${contentType}`);
-    throw e;
-  }
-}
-
-function receiverAckTimeoutError(message: string): ReceiverAckTimeoutError {
-  const error = new Error(message);
-  (error as ReceiverAckTimeoutError).code = ErrorCode.ReceiverAckTimeoutError;
-  return (error as ReceiverAckTimeoutError);
+  return JSON.parse(stringBody);
 }

@@ -1,30 +1,30 @@
 ---
-title: モーダルビューのオープン
+title: モーダルの開始
 lang: ja-jp
 slug: creating-modals
-order: 9
+order: 10
 ---
 
 <div class="section-content">
 
-<a href="https://api.slack.com/block-kit/surfaces/modals">モーダルビュー</a>は、ユーザー情報を収集したり、情報の動的な表示を実現するためのインタフェースです。モーダルビューは、適切な <code>trigger_id</code> と <a href="https://api.slack.com/reference/block-kit/views">ビュー部分のペイロード</a> を組み込みの API クライアントによる <a href="https://api.slack.com/methods/views.open"><code>views.open</code></a> メソッドの呼び出しに渡すことでオープンすることができます。
+<a href="https://api.slack.com/block-kit/surfaces/modals">モーダル</a>は、ユーザー情報を収集したり、動的な表示を実現するためのインターフェースです。モーダルは、有効な <code>trigger_id</code> と <a href="https://api.slack.com/reference/block-kit/views">ビュー部分のペイロード</a> を組み込みの API クライアントによる <a href="https://api.slack.com/methods/views.open"><code>views.open</code></a> メソッドの呼び出しに渡すことで開始することができます。
 
-<code>trigger_id</code> はコマンド、ボタンの押下、メニューの選択などによって Request URL に送信されたペイロードの項目として入手することができます。
+<code>trigger_id</code> はスラッシュコマンド、ボタンの押下、メニューの選択などによって Request URL に送信されたペイロードの項目として入手することができます。
 
-モーダルビューの作成についてのより詳細な情報は <a href="https://api.slack.com/surfaces/modals/using#composing_views">API ドキュメント</a>を参照してください。
+モーダルの生成についてのより詳細な情報は <a href="https://api.slack.com/surfaces/modals/using#composing_views">API ドキュメント</a>を参照してください。
 </div>
 
 ```javascript
 // コマンド起動をリッスン
-app.command('/ticket', ({ ack, payload, context }) => {
+app.command('/ticket', async ({ ack, body, context }) => {
   // コマンドのリクエストを確認
-  ack();
+  await ack();
 
   try {
-    const result = app.client.views.open({
+    const result = await app.client.views.open({
       token: context.botToken,
       // 適切な trigger_id を受け取ってから 3 秒以内に渡す
-      trigger_id: payload.trigger_id,
+      trigger_id: body.trigger_id,
       // view の値をペイロードに含む
       view: {
         type: 'modal',

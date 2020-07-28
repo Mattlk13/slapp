@@ -1,6 +1,6 @@
 {
   "name": "@slack/bolt",
-  "version": "1.4.1",
+  "version": "2.2.3",
   "description": "A framework for building Slack apps, fast.",
   "author": "Slack Technologies, Inc.",
   "license": "MIT",
@@ -29,24 +29,29 @@
     "build": "tsc",
     "build:clean": "shx rm -rf ./dist ./coverage ./.nyc_output",
     "lint": "tslint --project .",
-    "mocha": "nyc mocha --config .mocharc.json \"src/**/*.spec.ts\"",
-    "test": "npm run lint && npm run mocha",
+    "test-lint": "tslint --project tsconfig.test.json \"src/**/*.spec.ts\" && tslint --project tsconfig.test.json \"src/test-helpers.ts\"",
+    "mocha": "TS_NODE_PROJECT=tsconfig.test.json nyc mocha --config .mocharc.json \"src/**/*.spec.ts\"",
+    "test": "npm run lint && npm run test-lint && npm run mocha && npm run test:integration",
+    "test:integration": "cd integration-tests && npm install && npm test",
     "coverage": "codecov"
   },
   "repository": "slackapi/bolt",
-  "homepage": "https://slack.dev/bolt",
+  "homepage": "https://slack.dev/bolt-js",
   "bugs": {
-    "url": "https://github.com/slackapi/bolt/issues"
+    "url": "https://github.com/slackapi/bolt-js/issues"
   },
   "dependencies": {
-    "@slack/logger": ">=1.0.0 <3.0.0",
-    "@slack/types": "^1.2.1",
-    "@slack/web-api": "^5.6.0",
+    "@slack/logger": "^2.0.0",
+    "@slack/oauth": "^1.1.0",
+    "@slack/types": "^1.6.0",
+    "@slack/web-api": "^5.9.0",
     "@types/express": "^4.16.1",
     "@types/node": ">=10",
-    "axios": "^0.18.1",
+    "@types/promise.allsettled": "^1.0.3",
+    "axios": "^0.19.0",
     "express": "^4.16.4",
     "please-upgrade-node": "^3.2.0",
+    "promise.allsettled": "^1.0.2",
     "raw-body": "^2.3.3",
     "tsscmp": "^1.0.6"
   },
@@ -65,6 +70,6 @@
     "ts-node": "^8.1.0",
     "tslint": "^5.15.0",
     "tslint-config-airbnb": "^5.11.1",
-    "typescript": "^3.4.3"
+    "typescript": "^3.7.2"
   }
 }

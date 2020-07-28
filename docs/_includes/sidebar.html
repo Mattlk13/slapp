@@ -1,7 +1,7 @@
 <div class="sidebar-content">
   <div class="logo">
     <span class="icon">
-      <img src="{{ site.url | append: site.baseurl }}/assets/bolt-logo.png"/>
+      <img src="{{ site.url | append: site.baseurl }}/assets/bolt-js-logo.svg"/>
     </span>
 
     <span class="name">
@@ -42,7 +42,12 @@
     {% assign advanced_sections = site.advanced | sort: "order" | where: "lang", page.lang %}
     {% for section in advanced_sections %}
       <a href="{{ site.url | append: site.baseurl | append: localized_base_url }}/concepts#{{ section.slug }}">
-        <li>{{section.title}}</li>
+        <li>
+          {% if section.beta == true %}
+            <span class="beta">Beta</span>
+          {% endif %}
+         {{section.title}}
+        </li>
       </a>
     {% endfor %}
   </ul>
@@ -54,6 +59,6 @@
         <li class="title">{{tutorial.title}}</li>
       </a>
     {% endfor %}
-    <a href="https://github.com/SlackAPI/bolt/blob/master/.github/contributing.md"><li class="title">{{ site.t[page.lang].contribute }}</li></a>
+    <a href="https://github.com/SlackAPI/bolt-js/blob/master/.github/contributing.md"><li class="title">{{ site.t[page.lang].contribute }}</li></a>
   </ul>
 </div>

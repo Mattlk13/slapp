@@ -11,6 +11,7 @@ export type SlackEvent =
   | AppHomeOpenedEvent
   | AppMentionEvent
   | AppUninstalledEvent
+  | CallRejectedEvent
   | ChannelArchiveEvent
   | ChannelCreatedEvent
   | ChannelDeletedEvent
@@ -45,6 +46,7 @@ export type SlackEvent =
   | IMCreatedEvent
   | IMHistoryChangedEvent
   | IMOpenEvent
+  | InviteRequestedEvent
   | LinkSharedEvent
   | MemberJoinedChannelEvent
   | MemberLeftChannelEvent
@@ -156,6 +158,14 @@ export interface AppMentionEvent extends StringIndexed {
 
 export interface AppUninstalledEvent extends StringIndexed {
   type: 'app_uninstalled';
+}
+
+export interface CallRejectedEvent extends StringIndexed {
+  type: 'call_rejected';
+  call_id: string;
+  user_id: string;
+  channel_id: string;
+  external_unique_id: string;
 }
 
 export interface ChannelArchiveEvent extends StringIndexed {
@@ -417,6 +427,26 @@ export interface IMOpenEvent extends StringIndexed {
   channel: string;
 }
 
+export interface InviteRequestedEvent extends StringIndexed {
+  type: 'invite_requested';
+  invite_request: {
+    id: string;
+    email: string;
+    date_created: number;
+    requester_ids: string[];
+    channel_ids: string[];
+    invite_type: 'restricted' | 'ultra_restricted' | 'full_member';
+    real_name: string;
+    date_expire: number;
+    request_reason: string;
+    team: {
+      id: string;
+      name: string;
+      domain: string;
+    }
+  };
+}
+
 export interface LinkSharedEvent extends StringIndexed {
   type: 'link_shared';
   channel: string;
@@ -581,15 +611,31 @@ export interface PinRemovedEvent extends StringIndexed {
   event_ts: string;
 }
 
+interface ReactionMessageItem {
+  type: 'message';
+  channel: string;
+  ts: string;
+}
+
+interface ReactionFileItem {
+  type: 'file';
+  file: string;
+}
+
+// This type is deprecated.
+// See https://api.slack.com/changelog/2018-05-file-threads-soon-tread
+interface ReactionFileCommentItem {
+  type: 'file_comment';
+  file_comment: string;
+  file: string;
+}
+
 export interface ReactionAddedEvent extends StringIndexed {
   type: 'reaction_added';
   user: string;
   reaction: string;
   item_user: string;
-  // TODO: incomplete, should be message | file | file comment (deprecated)
-  // https://api.slack.com/events/reaction_added
-  item: {
-  };
+  item: ReactionMessageItem | ReactionFileItem | ReactionFileCommentItem;
   event_ts: string;
 }
 

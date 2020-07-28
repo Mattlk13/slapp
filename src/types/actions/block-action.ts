@@ -1,5 +1,6 @@
-import { PlainTextElement, Confirmation, Option, View } from '@slack/types';
+import { PlainTextElement, Confirmation, Option } from '@slack/types';
 import { StringIndexed } from '../helpers';
+import { ViewOutput } from '../view';
 
 /**
  * All known actions from in Slack's interactive elements
@@ -20,7 +21,8 @@ export type BlockElementAction =
   | MultiExternalSelectAction
   | OverflowAction
   | DatepickerAction
-  | RadioButtonsAction;
+  | RadioButtonsAction
+  | CheckboxesAction;
 
 /**
  * Any action from Slack's interactive elements
@@ -87,8 +89,8 @@ export interface UsersSelectAction extends BasicElementAction<'users_select'> {
  * An action from a multi select menu with user list
  */
 export interface MultiUsersSelectAction extends BasicElementAction<'multi_users_select'> {
-  selected_user: [string];
-  initial_user?: [string];
+  selected_users: [string];
+  initial_users?: [string];
   placeholder?: PlainTextElement;
   confirm?: Confirmation;
 }
@@ -186,6 +188,15 @@ export interface RadioButtonsAction extends BasicElementAction<'radio_buttons'> 
 }
 
 /**
+ * An action from a checkboxes element
+ */
+export interface CheckboxesAction extends BasicElementAction<'checkboxes'> {
+  selected_options: Option[];
+  initial_options?: Option[];
+  confirm?: Confirmation;
+}
+
+/**
  * A Slack Block Kit element action wrapped in the standard metadata.
  *
  * This describes the entire JSON-encoded body of a request from Slack's Block Kit interactive components.
@@ -215,7 +226,7 @@ export interface BlockAction<ElementAction extends BasicElementAction = BlockEle
     text?: string; // undocumented that this is optional, but how could it exist on block kit based messages?
     [key: string]: any;
   };
-  view?: View;
+  view?: ViewOutput;
   token: string;
   response_url: string;
   trigger_id: string;
@@ -239,3 +250,5 @@ export type BlockChannelsSelectAction = BlockAction<ChannelsSelectAction>;
 export type BlockExternalSelectAction = BlockAction<ExternalSelectAction>;
 export type BlockOverflowAction = BlockAction<OverflowAction>;
 export type BlockDatepickerAction = BlockAction<DatepickerAction>;
+export type BlockRadioButtonsAction = BlockAction<RadioButtonsAction>;
+export type BlockCheckboxesAction = BlockAction<CheckboxesAction>;

@@ -2,7 +2,7 @@
 title: Opening modals
 lang: en
 slug: creating-modals
-order: 9
+order: 10
 ---
 
 <div class="section-content">
@@ -15,15 +15,15 @@ Read more about modal composition in the <a href="https://api.slack.com/surfaces
 
 ```javascript
 // Listen for a slash command invocation
-app.command('/ticket', ({ ack, payload, context }) => {
+app.command('/ticket', async ({ ack, body, context }) => {
   // Acknowledge the command request
-  ack();
+  await ack();
 
   try {
-    const result = app.client.views.open({
+    const result = await app.client.views.open({
       token: context.botToken,
       // Pass a valid trigger_id within 3 seconds of receiving it
-      trigger_id: payload.trigger_id,
+      trigger_id: body.trigger_id,
       // View payload
       view: {
         type: 'modal',

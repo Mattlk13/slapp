@@ -18,9 +18,9 @@ redirect_from:
 ---
 
 ### アプリを作成する
-最初にやるべきこと: Bolt で開発を始める前に、 [Slack アプリを作成](https://api.slack.com/apps/new)します。 
+最初にやるべきこと: Bolt で開発を始める前に、 [Slack アプリを作成](https://api.slack.com/apps/new)します。
 
-> 💡 いつもの仕事のさまたげにならないように、別に開発用のワークスペースを使用することをお勧めします — [新しいワークスペースを無料で作成](https://slack.com/get-started#create)できます。
+> 💡 いつもの仕事のさまたげにならないように、別に開発用のワークスペースを使用することをおすすめします — [新しいワークスペースを無料で作成](https://slack.com/get-started#create)できます。
 
 アプリ名を入力し (後で変更可能)、インストール先のワークスペースを選択したら、`Create App`  ボタンをクリックすると、アプリの  **Basic Information**  ページが表示されます。
 
@@ -35,21 +35,19 @@ redirect_from:
 ### トークンとアプリのインストール
 Slack アプリは、[OAuth を使用して、Slack の API へのアクセスを管理](https://api.slack.com/docs/oauth)します。アプリがインストールされると、トークンを受け取ります。そのトークンを使って、アプリは API メソッドを呼び出すことができます。
 
-Slack アプリに使用できるトークンタイプは、user(`xoxp`) トークンと bot(`xoxb`) トークンの 2 つです。ユーザートークンを使用すると、ユーザーがアプリをインストールまたは認証した後で、ユーザーに代わって API メソッドを呼び出すことができます。単一のワークスペースに複数のユーザートークンが存在する場合があります。ボットトークンは、アプリがインストールされるすべてのワークスペースで 1 回付与されます。ただし、ボットトークンは、アプリにボットユーザーを追加する必要があります。どのユーザーがインストールを実行しても、アプリで使用されるボットトークンは同じになります。
+Slack アプリに使用できるトークンには、user(`xoxp`) トークンと bot(`xoxb`) トークンの 2 種類があります。ユーザートークンを使用すると、ユーザーがアプリをインストールまたは認証した後で、ユーザーに代わって API メソッドを呼び出すことができます。単一のワークスペースに複数のユーザートークンが存在する場合があります。ボットトークンはボットユーザーに紐づいており、ワークスペースの誰かがアプリをインストールするとそのワークスペースに 1 回付与されます。どのユーザーがインストールを実行しても、アプリで使用されるボットトークンは同じものになります。実際にはほとんどのアプリで使用されるトークンの種別はユーザートークンではなく、ボットトークンになるでしょう。
 
 説明を簡潔にするために、このガイドではボットトークンを使用します。
 
-ボットユーザーを追加するには、左側のサイドバーの  **Bot Users**  をクリックしてから、**Add A Bot User**  をクリックします。表示名とユーザー名を指定して、**Add Bot User**  をクリックします。
+左側のサイドバーの **OAuth & Permissions** にアクセスして、**Bot Token Scopes** までスクロールします。そして、**Add an OAuth Scope** をクリックします。
 
-Slack へのメッセージの送信権限を持つボットユーザーが追加されたので、まずはワークスペースにアプリをインストールしましょう。
+とりあえずは、[`chat:write`](https://api.slack.com/scopes/chat:write) というスコープだけを追加してみましょう。これは、アプリにボットユーザがメンバーとして参加しているチャンネルへのメッセージの投稿を許可するスコープです。
 
-左側のサイドバーにある  **Install App**  をクリックし、ページ上部の  **Install App to Workspace**  ボタンをクリックします。アプリがリクエストしている権限の詳細を示す画面が表示されます。これは、アプリの OAuth トークンに適用されるスコープと相関しています。
+ページ上部までスクロールして戻り、**Install App to Workspace** をクリックします。すると、開発用のワークスペースにこのアプリをインストールするための Slack の OAuth 確認画面へと誘導されます。
 
-インストールを承認すると、**OAuth & Permissions**  ページが表示されます。
+インストールを承認すると、**OAuth & Permissions** ページが表示され、**Bot User OAuth Access Token** を確認することができるはずです。
 
 ![OAuth Tokens](../../assets/bot-token.png "OAuth Tokens")
-
-2 つのトークンが表示されます。今回は`xoxb` ボットトークンを使用します。(このページを下にスクロールして  **Scope**  セクションを表示すると、`xoxp` トークンに追加できるさまざまなスコープが確認できます。)
 
 > 💡 トークンは、パスワードのように大切に扱い、[安全に保管](https://api.slack.com/docs/oauth-safety)してください。アプリではそのトークンを使用して、Slack ワークスペースからの情報を投稿および取得します。
 
@@ -132,7 +130,7 @@ node app.js
 <h4>開発用のローカルリクエスト URL </h4>
 </summary>
 
-アプリの開発を始めたばかりの場合は、パブリック URL をまだお持ちでないかもしれません。最終的には自ら URL をセットアップすることになるかもしれませんが、現時点では [ngrok](https://ngrok.com/) のような開発プロキシを利用することをお勧めします。これにより、パブリック URL が作成され、リクエストが開発環境にトンネルされます。[Slack でのローカル開発に ngrok を使用](https://api.slack.com/tutorials/tunneling-with-ngrok)する方法についてのチュートリアルを作成しておきました。このチュートリアルに従えば、すべてをセットアップすることができます。
+アプリの開発を始めたばかりの場合は、パブリック URL をまだお持ちでないかもしれません。最終的には自ら URL をセットアップすることになるかもしれませんが、現時点では [ngrok](https://ngrok.com/) のような開発プロキシを利用することをおすすめします。これにより、パブリック URL が作成され、リクエストが開発環境にトンネルされます。[Slack でのローカル開発に ngrok を使用](https://api.slack.com/tutorials/tunneling-with-ngrok)する方法についてのチュートリアルを作成しておきました。このチュートリアルに従えば、すべてをセットアップすることができます。
 
 開発用プロキシをインストールしたら、それを実行して特定のポートへのリクエストの転送を開始します (この例ではポート 3000 を使用していますが、アプリの初期化に使用するポートをカスタマイズした場合は、代わりにそのポートを使用してください)。
 
@@ -142,7 +140,7 @@ ngrok http 3000
 
 ![Running ngrok](../../assets/ngrok.gif "Running ngrok")
 
-使用可能な URL が生成され、出力されます ( `https://` で始まる URL をお勧めします)。この URL がリクエスト URL のベースになります。この例では `https://8e8ec2d7.ngrok.io` です。
+使用可能な URL が生成され、出力されます ( `https://` で始まる URL をおすすめします)。この URL がリクエスト URL のベースになります。この例では `https://8e8ec2d7.ngrok.io` です。
 
 ---
 </details>
@@ -172,9 +170,9 @@ const app = new App({
 });
 
 // Listens to incoming messages that contain "hello"
-app.message('hello', ({ message, say }) => {
+app.message('hello', async ({ message, say }) => {
   // say() sends a message to the channel where the event was triggered
-  say(`Hey there <@${message.user}>!`);
+  await say(`Hey there <@${message.user}>!`);
 });
 
 (async () => {
@@ -193,7 +191,7 @@ app.message('hello', ({ message, say }) => {
 
 ### アクションの送信と応答
 
-ボタン、選択メニュー、日付ピッカー、ダイアログ、メッセージ操作などの機能を使用するには、インタラクティブ性を有効にする必要があります。イベントと同様に、Slack の URL を指定してアクション ( 「ボタン・クリック」など) を送信する必要があります。
+ボタン、選択メニュー、日付ピッカー、ダイアログなどの機能を使用するには、インタラクティブ性を有効にする必要があります。イベントと同様に、Slack の URL を指定してアクション ( 「ボタン・クリック」など) を送信する必要があります。
 
 アプリ設定ページに戻り、左側の  **Interactive Components**  をクリックします。**Request URL**  ボックスがもう 1 つあることがわかります。
 
@@ -216,26 +214,27 @@ const app = new App({
 });
 
 // Listens to incoming messages that contain "hello"
-app.message('hello', ({ message, say }) => {
+app.message('hello', async ({ message, say }) => {
   // say() sends a message to the channel where the event was triggered
-  say({
+  await say({
     blocks: [
-    {
-	    "type": "section",
-      "text": {
-        "type": "mrkdwn",
-        "text": `Hey there <@${message.user}>!`
-      },
-      "accessory": {
-        "type": "button",
+      {
+        "type": "section",
         "text": {
-          "type": "plain_text",
-          "text": "Click Me"
+          "type": "mrkdwn",
+          "text": `Hey there <@${message.user}>!`
         },
-        "action_id": "button_click"
+        "accessory": {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Click Me"
+          },
+          "action_id": "button_click"
+        }
       }
-     }
-    ]
+    ],
+    text: `Hey there <@${message.user}>!`
   });
 });
 
@@ -266,9 +265,9 @@ const app = new App({
 });
 
 // Listens to incoming messages that contain "hello"
-app.message('hello', ({ message, say }) => {
+app.message('hello', async ({ message, say }) => {
   // say() sends a message to the channel where the event was triggered
-  say({
+  await say({
     blocks: [
       {
         "type": "section",
@@ -285,14 +284,15 @@ app.message('hello', ({ message, say }) => {
           "action_id": "button_click"
         }
       }
-    ]
+    ],
+    text: `Hey there <@${message.user}>!`
   });
 });
 
-app.action('button_click', ({ body, ack, say }) => {
+app.action('button_click', async ({ body, ack, say }) => {
   // Acknowledge the action
-  ack();
-  say(`<@${body.user.id}> clicked the button`);
+  await ack();
+  await say(`<@${body.user.id}> clicked the button`);
 });
 
 (async () => {

@@ -2,10 +2,12 @@
 import 'mocha';
 import { assert, AssertionError } from 'chai';
 import sinon, { SinonSpy } from 'sinon';
-import { Override, createFakeLogger, delay, wrapToResolveOnFirstCall } from './test-helpers';
+import { Override, createFakeLogger, delay } from './test-helpers';
 import rewiremock from 'rewiremock';
 import { ConversationStore } from './conversation-store';
-import { AnyMiddlewareArgs, NextMiddleware, Context } from './types';
+import { AnyMiddlewareArgs, NextFn, Context } from './types';
+import { WebClient } from '@slack/web-api';
+import { Logger } from '@slack/logger';
 
 describe('conversationContext middleware', () => {
   it('should forward events that have no conversation ID', async () => {
@@ -19,11 +21,16 @@ describe('conversationContext middleware', () => {
     const { conversationContext } = await importConversationStore(
       withGetTypeAndConversation(fakeGetTypeAndConversation),
     );
-    const fakeArgs = { body: {}, context: dummyContext, next: fakeNext } as unknown as MiddlewareArgs;
+    const fakeArgs = {
+      body: {},
+      context: dummyContext,
+      next: fakeNext,
+      logger: fakeLogger,
+    } as unknown as MiddlewareArgs;
 
     // Act
-    const middleware = conversationContext(fakeStore, fakeLogger);
-    middleware(fakeArgs);
+    const middleware = conversationContext(fakeStore);
+    await middleware(fakeArgs);
 
     // Assert
     assert(fakeLogger.debug.called);
@@ -45,31 +52,32 @@ describe('conversationContext middleware', () => {
       sinon.fake.resolves(dummyStoreSetResult),
     );
     const fakeLogger = createFakeLogger();
-    const { fn: next, promise: onNextFirstCall } = wrapToResolveOnFirstCall(assertions);
+    const fakeNext = sinon.fake();
     const dummyContext: DummyContext<symbol> = {};
     const { conversationContext } = await importConversationStore(
       withGetTypeAndConversation(fakeGetTypeAndConversation),
     );
-    const fakeArgs = { next, body: {}, context: dummyContext } as unknown as MiddlewareArgs;
+    const fakeArgs = {
+      body: {},
+      context: dummyContext,
+      next: fakeNext,
+      logger: fakeLogger,
+    } as unknown as MiddlewareArgs;
 
     // Act
-    const middleware = conversationContext(fakeStore, fakeLogger);
-    middleware(fakeArgs);
+    const middleware = conversationContext(fakeStore);
+    await middleware(fakeArgs);
 
     // Assert
-    async function assertions(...args: any[]): Promise<void> {
-      assert.notExists(args[0]);
-      assert.notProperty(dummyContext, 'conversation');
-      if (dummyContext.updateConversation !== undefined) {
-        const result = await dummyContext.updateConversation(dummyConversationState);
-        assert.equal(result, dummyStoreSetResult);
-        assert(fakeStore.set.calledOnce);
-        assert(fakeStore.set.calledWith(dummyConversationId, dummyConversationState));
-      } else {
-        assert.fail();
-      }
+    assert(fakeNext.called);
+    assert.notProperty(dummyContext, 'conversation');
+    // NOTE: chai types do not offer assertion signatures yet, and neither do node's assert module types.
+    if (dummyContext.updateConversation === undefined) {
+      assert.fail();
     }
-    return onNextFirstCall;
+    assert.equal(await dummyContext.updateConversation(dummyConversationState), dummyStoreSetResult);
+    assert(fakeStore.set.calledOnce);
+    assert(fakeStore.set.calledWith(dummyConversationId, dummyConversationState));
   });
 
   it('should add to the context for events within a conversation that was previously stored', async () => {
@@ -83,32 +91,33 @@ describe('conversationContext middleware', () => {
       sinon.fake.resolves(dummyStoreSetResult),
     );
     const fakeLogger = createFakeLogger();
-    const { fn: next, promise: onNextFirstCall } = wrapToResolveOnFirstCall(assertions);
+    const fakeNext = sinon.fake();
     const dummyContext: DummyContext<symbol> = {};
     const { conversationContext } = await importConversationStore(
       withGetTypeAndConversation(fakeGetTypeAndConversation),
     );
-    const fakeArgs = { next, body: {}, context: dummyContext } as unknown as MiddlewareArgs;
+    const fakeArgs = {
+      body: {},
+      context: dummyContext,
+      next: fakeNext,
+      logger: fakeLogger,
+    } as unknown as MiddlewareArgs;
 
     // Act
-    const middleware = conversationContext(fakeStore, fakeLogger);
-    middleware(fakeArgs);
+    const middleware = conversationContext(fakeStore);
+    await middleware(fakeArgs);
 
     // Assert
-    async function assertions(...args: any[]): Promise<void> {
-      assert.notExists(args[0]);
-      assert.equal(dummyContext.conversation, dummyConversationState);
-      if (dummyContext.updateConversation !== undefined) {
-        const newDummyConversationState = Symbol();
-        const result = await dummyContext.updateConversation(newDummyConversationState);
-        assert.equal(result, dummyStoreSetResult);
-        assert(fakeStore.set.calledOnce);
-        assert(fakeStore.set.calledWith(dummyConversationId, newDummyConversationState));
-      } else {
-        assert.fail();
-      }
+    assert.equal(dummyContext.conversation, dummyConversationState);
+    // NOTE: chai types do not offer assertion signatures yet, and neither do node's assert module types.
+    if (dummyContext.updateConversation === undefined) {
+      assert.fail();
     }
-    return onNextFirstCall;
+    const newDummyConversationState = Symbol();
+    const result = await dummyContext.updateConversation(newDummyConversationState);
+    assert.equal(result, dummyStoreSetResult);
+    assert(fakeStore.set.calledOnce);
+    assert(fakeStore.set.calledWith(dummyConversationId, newDummyConversationState));
   });
 });
 
@@ -186,7 +195,12 @@ describe('MemoryStore', () => {
 
 /* Testing Harness */
 
-type MiddlewareArgs = AnyMiddlewareArgs & { next: NextMiddleware, context: Context };
+type MiddlewareArgs = AnyMiddlewareArgs & {
+  next: NextFn,
+  context: Context,
+  logger: Logger,
+  client: WebClient,
+};
 
 interface DummyContext<ConversationState> {
   conversation?: ConversationState;
@@ -221,9 +235,12 @@ function createFakeStore(
 ): FakeStore {
   return {
     // NOTE (Nov 2019): We had to convert to 'unknown' first due to the following error:
-    // src/conversation-store.spec.ts:223:10 - error TS2352: Conversion of type 'SinonSpy<any[], any>' to type 'SinonSpy<[string, any, (number | undefined)?], Promise<unknown>>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+    // src/conversation-store.spec.ts:223:10 - error TS2352: Conversion of type 'SinonSpy<any[], any>' to
+    // type 'SinonSpy<[string, any, (number | undefined)?], Promise<unknown>>' may be a mistake because neither type
+    // sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
     //   Types of property 'firstCall' are incompatible.
-    //     Type 'SinonSpyCall<any[], any>' is not comparable to type 'SinonSpyCall<[string, any, (number | undefined)?], Promise<unknown>>'.
+    //     Type 'SinonSpyCall<any[], any>' is not comparable to type 'SinonSpyCall<[string, any, (number | undefined)?],
+    // Promise<unknown>>'.
     //       Type 'any[]' is not comparable to type '[string, any, (number | undefined)?]'.
     // 223     set: setSpy as SinonSpy<Parameters<ConversationStore['set']>, ReturnType<ConversationStore['set']>>,
     //              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -1,9 +1,9 @@
-# Slack ⚡️ Bolt
+# Bolt ![Bolt logo](docs/assets/bolt-logo.svg) for JavaScript
 
-[![Build Status](https://travis-ci.org/slackapi/bolt.svg?branch=master)](https://travis-ci.org/slackapi/bolt)
-[![codecov](https://codecov.io/gh/slackapi/bolt/branch/master/graph/badge.svg)](https://codecov.io/gh/slackapi/bolt)
+[![Build Status](https://travis-ci.org/slackapi/bolt-js.svg?branch=master)](https://travis-ci.org/slackapi/bolt-js)
+[![codecov](https://codecov.io/gh/slackapi/bolt/branch/master/graph/badge.svg)](https://codecov.io/gh/slackapi/bolt-js)
 
-A framework to build Slack apps, _fast_.
+A JavaScript framework to build Slack apps in a flash with the latest platform features.
 
 ## Initialization
 
@@ -27,6 +27,8 @@ const app = new App({
 })();
 ```
 
+> ⚙️ By default, Bolt will listen to the `/slack/events` endpoint of your public URL for all incoming requests (whether shortcuts, events, or interactivity payloads). When configuring Request URLs in your app configuration, the should all have `/slack/events` appended by default. You can modify the default behavior using the endpoints option in the App constructor. This option can be set to a string, or an array of strings, of the paths to use instead of '/slack/events'.
+
 ## Listening for events
 
 Apps typically react to incoming events, which can be events, actions, commands, or options requests. For each type of
@@ -36,8 +38,17 @@ event, there's a method to attach a listener function.
 // Listen for an event from the Events API
 app.event(eventType, fn);
 
-// Listen for an action from a block element (buttons, menus, etc), dialog submission, message action, or legacy action
+// Listen for an action from a block element (buttons, menus, etc)
 app.action(actionId, fn);
+
+// Listen for dialog submission, or legacy action
+app.action({ callback_id: callbackId }, fn);
+
+// Listen for a global shortcut, or message shortcut
+app.shortcut(callbackId, fn);
+
+// Listen for modal view requests
+app.view(callbackId, fn);
 
 // Listen for a slash command
 app.command(commandName, fn);
@@ -70,15 +81,17 @@ called with arguments that make it easy to build a rich app.
 *  `say` - A function to respond to an incoming event. This argument is only available when the listener is triggered
    for event that contains a `channel_id` (including `message` events). Call this function to send a message back to the
    same channel as the incoming event. It accepts both simple strings (for plain messages) and objects (for complex
-   messages, including blocks or attachments).
+   messages, including blocks or attachments). `say` returns a promise that will resolve with a
+   [response](https://api.slack.com/methods/chat.postMessage) from `chat.postMessage`.
 
 *  `ack` - A function to acknowledge that an incoming event was received by the app. Incoming events from actions,
    commands, and options requests **must** be acknowledged by calling this function. See [acknowledging
-   events](#acknowledging-events) for details.
+   events](#acknowledging-events) for details. `ack` returns a promise that resolves when complete.
 
 *  `respond` - A function to respond to an incoming event. This argument is only available when the listener is
    triggered for an event that contains a `response_url` (actions and commands). Call this function to send a message
-   back to the same channel as the incoming event, but using the semantics of the `response_url`.
+   back to the same channel as the incoming event, but using the semantics of the `response_url`. `respond`
+   returns a promise that resolves with the results of responding using the `response_url`.
 
 *  `context` - The event context. This object contains data about the message and the app, such as the `botId`.
    See [advanced usage](#advanced-usage) for more details.
@@ -94,9 +107,9 @@ Here is an example where the app sends a simple response, so there's no need for
 
 ```js
 // Reverse all messages the app can hear
-app.message(({ message, say }) => {
+app.message(async ({ message, say }) => {
   const reversedText = message.text.split('').reverse().join('');
-  say(reversedText);
+  await say(reversedText);
 });
 ```
 
@@ -137,7 +150,7 @@ soon as possible.
 
 Depending on the type of incoming event a listener is meant for, `ack()` should be called with a parameter:
 
-*  Block actions and message actions: Call `ack()` with no parameters.
+*  Block actions, global shortcuts, and message shortcuts: Call `ack()` with no parameters.
 
 *  Dialog submissions: Call `ack()` with no parameters when the inputs are all valid, or an object describing the
    validation errors if any inputs are not valid.
@@ -148,16 +161,13 @@ Depending on the type of incoming event a listener is meant for, `ack()` should 
    to to update the message with a simple message, or an `object` to replace it with a complex message. Replacing the
    message to remove the interactive elements is a best practice for any action that should only be performed once.
 
-If an app does not call `ack()` within the time limit, Bolt will generate an error. See [handling
-errors](#handling-errors) for more details.
-
 The following is an example of acknowledging a dialog submission:
 
 ```js
 app.action({ callbackId: 'my_dialog_callback' }, async ({ action, ack }) => {
   // Expect the ticketId value to begin with "CODE"
   if (action.submission.ticketId.indexOf('CODE') !== 0) {
-    ack({
+    await ack({
       errors: [{
         name: 'ticketId',
         error: 'This value must begin with CODE',
@@ -165,7 +175,7 @@ app.action({ callbackId: 'my_dialog_callback' }, async ({ action, ack }) => {
     });
     return;
   }
-  ack();
+  await ack();
 
   // Do some work
 });
@@ -188,9 +198,7 @@ app.error((error) => {
 If you do not attach an error handler, the app will log these errors to the console by default.
 
 The `app.error()` method should be used as a last resort to catch errors. It is always better to deal with errors in the
-listeners where they occur because you can use all the context available in that listener. If the app expects that using
-`say()` or `respond()` can fail, it's always possible to use `app.client.chat.postMessage()` instead, which returns a
-`Promise` that can be caught to deal with the error.
+listeners where they occur because you can use all the context available in that listener.
 
 ## Advanced usage
 
@@ -202,7 +210,7 @@ In fact, middleware can be _chained_ so that any number of middleware functions 
 and they each run in the order they were added to the chain.
 
 Middleware are just functions - nearly identical to listener functions. They can choose to respond right away, to extend
-the `context` argument and continue, or trigger an error. The only difference is that middleware use a special `next()`
+the `context` argument and continue, or trigger an error. The only difference is that middleware use a special `next`
 argument, a function that's called to let the app know it can continue to the next middleware (or listener) in the
 chain.
 
@@ -230,7 +238,7 @@ const app = new App({
 app.use(authWithAcme);
 
 // The listener now has access to the user details
-app.message('whoami', ({ say, context }) => { say(`User Details: ${JSON.stringify(context.user)}`) });
+app.message('whoami', async ({ say, context }) => { await say(`User Details: ${JSON.stringify(context.user)}`) });
 
 (async () => {
   // Start the app
@@ -240,34 +248,33 @@ app.message('whoami', ({ say, context }) => { say(`User Details: ${JSON.stringif
 
 // Authentication middleware - Calls Acme identity provider to associate the incoming event with the user who sent it
 // It's a function just like listeners, but it also uses the next argument
-function authWithAcme({ payload, context, say, next }) {
+async function authWithAcme({ payload, context, say, next }) {
   const slackUserId = payload.user;
 
-  // Assume we have a function that can take a Slack user ID as input to find user details from the provider
-  acme.lookupBySlackId(slackUserId)
-    .then((user) => {
-      // When the user lookup is successful, add the user details to the context
-      context.user = user;
-
-      // Pass control to the next middleware (if there are any) and the listener functions
-      next();
-    })
-    .catch((error) => {
-      // Uh oh, this user hasn't registered with Acme. Send them a registration link, and don't let the
-      // middleware/listeners continue
-      if (error.message === 'Not Found') {
+  try {
+    // Assume we have a function that can take a Slack user ID as input to find user details from the provider
+    const user = await acme.lookupBySlackId(slackUserId);
+      
+    // When the user lookup is successful, add the user details to the context
+    context.user = user;
+  } catch (error) {
+    if (error.message === 'Not Found') {
         // In the real world, you would need to check if the say function was defined, falling back to the respond
         // function if not, and then falling back to only logging the error as a last resort.
-        say(`I'm sorry <@${slackUserId}, you aren't registered with Acme. Please use <https://acme.com/register> to use this app.`);
-         return;
-      }
-
-      // This middleware doesn't know how to handle any other errors. Pass control to the previous middleware (if there
-      // are any) or the global error handler.
-      next(error);
-    });
+        await say(`I'm sorry <@${slackUserId}>, you aren't registered with Acme. Please use <https://acme.com/register> to use this app.`);
+        return;
+    }
+    
+    // This middleware doesn't know how to handle any other errors. 
+    // Pass control to the previous middleware (if there are any) or the global error handler.
+    throw error;
+  }
+  
+  // Pass control to the next middleware (if there are any) and the listener functions
+  // Note: You probably don't want to call this inside a `try` block, or any middleware
+  //       after this one that throws will be caught by it. 
+  await next();
 }
-
 ```
 
 ### Listener middleware
@@ -283,20 +290,20 @@ before the listener attached to `message` events:
 
 ```js
 // Listener middleware - filters out messages that have subtype 'bot_message'
-function noBotMessages({ message, next }) {
+async function noBotMessages({ message, next }) {
   if (!message.subtype || message.subtype !== 'bot_message') {
-     next();
+    await next();
   }
 }
 
 // The listener only sees messages from human users
 app.message(noBotMessages, ({ message }) => console.log(
-`(MSG) User: ${message.user}
-       Message: ${message.text}`
+  `(MSG) User: ${message.user}
+         Message: ${message.text}`
 ));
 ```
 
-Message subtype matching is common, so Bolt ships with a builtin listener middleware that filters all messages that
+Message subtype matching is common, so Bolt for JavaScript ships with a builtin listener middleware that filters all messages that
 match a given subtype. The following is an example of the opposite of the one above - the listener only sees messages
 that _are_ `bot_message`s.
 
@@ -307,8 +314,8 @@ const { App, subtype } = require('@slack/bolt');
 
 // The listener only sees messages from bot users (apps)
 app.message(subtype('bot_message'), ({ message }) => console.log(
-`(MSG) Bot: ${message.bot_id}
-       Message: ${message.text}`
+  `(MSG) Bot: ${message.bot_id}
+         Message: ${message.text}`
 ));
 ```
 
@@ -318,36 +325,61 @@ The examples above all illustrate how middleware can be used to process an event
 middleware in the chain) run. However, middleware can be designed to process the event _after_ the listener finishes.
 In general, a middleware can run both before and after the remaining middleware chain.
 
-In order to process the event after the listener, the middleware passes a function to `next()`. The function receives
-two arguments:
+How you use `next` can
+have four different effects:
 
-* `error` - The value is falsy when the middleware chain finished handling the event normally. When a later
-  middleware calls `next(error)` (where `error` is an `Error`), then this value is set to the `error`.
+* **To both preprocess and post-process events** - You can choose to do work both _before_ listener functions by putting code
+  before `await next()` and _after_ by putting code after `await next()`. `await next()` passes control down the middleware
+  stack in the order it was defined, then back up it in reverse order.
 
-* `done` - A callback that **must** be called when processing is complete. When there is no error, or the incoming
-  error has been handled, `done()` should be called with no parameters. If instead the middleware is propagating an
-  error up the middleware chain, `done(error)` should be called with the error as its only parameter.
+* **To throw an error** - If you don't want to handle an error in a listener, or want to let an upstream listener
+  handle it, you can simply **not** call `await next()` and `throw` an `Error`.
+
+* **To handle mid-processing errors** - While not commonly used, as `App#error` is essentially a global version of this,
+  you can catch any error of any downstream middleware by surrounding `await next()` in a `try-catch` block.
+
+* **To break the middleware chain** - You can stop middleware from progressing by simply not calling `await next()`.
+  By it's nature, throwing an error tends to be an example of this as code after a throw isn't executed.
 
 The following example shows a global middleware that calculates the total processing time for the middleware chain by
 calculating the time difference from before the listener and after the listener:
 
 ```js
-function logProcessingTime({ next }) {
+async function logProcessingTime({ next }) {
   const startTimeMs = Date.now();
-  next((error, done) => {
-    // This middleware doesn't deal with any errors, so it propagates any truthy value to the previous middleware
-    if (error) {
-      done(error);
-      return;
-    }
-
-    const endTimeMs = Date.now();
-    console.log(`Total processing time: ${endTimeMs - startTimeMs}`);
-
-    // Continue normally
-    done();
-  });
+  
+  await next();
+  
+  const endTimeMs = Date.now();
+  console.log(`Total processing time: ${endTimeMs - startTimeMs}`);
 }
 
 app.use(logProcessingTime)
+```
+
+The next example shows a series of global middleware where one generates an error
+and the other handles it.
+
+```js
+app.use(async ({ next, say }) => {
+  try {
+    await next();
+  } catch (error) {
+    if (error.message === 'channel_not_found') {
+      // Handle known errors
+      await say('It appears we can't access that channel')
+    } else {
+      // Rethrow for an upstream error handler
+      throw error;
+    }
+  }
+})
+
+app.use(async () => {
+  throw new Error('channel_not_found')
+})
+
+app.use(async () => {
+  // This never gets called as the middleware above never calls next
+})
 ```

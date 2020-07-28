@@ -3,8 +3,10 @@ import {
   SlackCommandMiddlewareArgs,
   SlackOptionsMiddlewareArgs,
   SlackActionMiddlewareArgs,
+  SlackShortcutMiddlewareArgs,
   SlackAction,
   OptionsSource,
+  MessageShortcut,
 } from './types';
 
 /**
@@ -16,6 +18,7 @@ export enum IncomingEventType {
   Command,
   Options,
   ViewAction,
+  Shortcut,
 }
 
 /**
@@ -47,11 +50,23 @@ export function getTypeAndConversation(body: any): { type?: IncomingEventType, c
       conversationId: optionsBody.channel !== undefined ? optionsBody.channel.id : undefined,
     };
   }
-  if (body.actions !== undefined || body.type === 'dialog_submission' || body.type === 'message_action') {
+  if (body.actions !== undefined || body.type === 'dialog_submission') {
     const actionBody = (body as SlackActionMiddlewareArgs<SlackAction>['body']);
     return {
       type: IncomingEventType.Action,
       conversationId: actionBody.channel !== undefined ? actionBody.channel.id : undefined,
+    };
+  }
+  if (body.type === 'shortcut') {
+    return {
+      type: IncomingEventType.Shortcut,
+    };
+  }
+  if (body.type === 'message_action') {
+    const shortcutBody = (body as SlackShortcutMiddlewareArgs<MessageShortcut>['body']);
+    return {
+      type: IncomingEventType.Shortcut,
+      conversationId: shortcutBody.channel !== undefined ? shortcutBody.channel.id : undefined,
     };
   }
   if (body.type === 'view_submission' || body.type === 'view_closed') {
@@ -65,6 +80,6 @@ export function getTypeAndConversation(body: any): { type?: IncomingEventType, c
 /* istanbul ignore next */
 
 /** Helper that should never be called, but is useful for exhaustiveness checking in conditional branches */
-export function assertNever(x: never): never {
+export function assertNever(x?: never): never {
   throw new Error(`Unexpected object: ${x}`);
 }

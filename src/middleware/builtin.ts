@@ -5,96 +5,118 @@ import {
   SlackCommandMiddlewareArgs,
   SlackEventMiddlewareArgs,
   SlackOptionsMiddlewareArgs,
+  SlackShortcutMiddlewareArgs,
   SlackViewMiddlewareArgs,
   SlackEvent,
   SlackAction,
+  SlackShortcut,
   SlashCommand,
   ViewSubmitAction,
   ViewClosedAction,
   OptionsRequest,
   InteractiveMessage,
   DialogSubmitAction,
-  MessageAction,
+  GlobalShortcut,
+  MessageShortcut,
   BlockElementAction,
-  ContextMissingPropertyError,
   SlackViewAction,
 } from '../types';
-import { ActionConstraints, ViewConstraints } from '../App';
-import { ErrorCode, errorWithCode } from '../errors';
+import { ActionConstraints, ViewConstraints, ShortcutConstraints } from '../App';
+import { ContextMissingPropertyError } from '../errors';
 
 /**
  * Middleware that filters out any event that isn't an action
  */
-export const onlyActions: Middleware<AnyMiddlewareArgs & { action?: SlackAction }> = ({ action, next }) => {
+export const onlyActions: Middleware<AnyMiddlewareArgs & { action?: SlackAction }> = async ({ action, next }) => {
   // Filter out any non-actions
   if (action === undefined) {
     return;
   }
 
   // It matches so we should continue down this middleware listener chain
-  next();
+  // TODO: remove the non-null assertion operator
+  await next!();
+};
+
+/**
+ * Middleware that filters out any event that isn't a shortcut
+ */
+// tslint:disable-next-line: max-line-length
+export const onlyShortcuts: Middleware<AnyMiddlewareArgs & { shortcut?: SlackShortcut }> = async ({ shortcut, next }) => {
+  // Filter out any non-shortcuts
+  if (shortcut === undefined) {
+    return;
+  }
+
+  // It matches so we should continue down this middleware listener chain
+  // TODO: remove the non-null assertion operator
+  await next!();
 };
 
 /**
  * Middleware that filters out any event that isn't a command
  */
-export const onlyCommands: Middleware<AnyMiddlewareArgs & { command?: SlashCommand }> = ({ command, next }) => {
+export const onlyCommands: Middleware<AnyMiddlewareArgs & { command?: SlashCommand }> = async ({ command, next }) => {
   // Filter out any non-commands
   if (command === undefined) {
     return;
   }
 
   // It matches so we should continue down this middleware listener chain
-  next();
+  // TODO: remove the non-null assertion operator
+  await next!();
 };
 
 /**
  * Middleware that filters out any event that isn't an options
  */
-export const onlyOptions: Middleware<AnyMiddlewareArgs & { options?: OptionsRequest }> = ({ options, next }) => {
+export const onlyOptions: Middleware<AnyMiddlewareArgs & { options?: OptionsRequest }> = async ({ options, next }) => {
   // Filter out any non-options requests
   if (options === undefined) {
     return;
   }
 
   // It matches so we should continue down this middleware listener chain
-  next();
+  // TODO: remove the non-null assertion operator
+  await next!();
 };
 
 /**
  * Middleware that filters out any event that isn't an event
  */
-export const onlyEvents: Middleware<AnyMiddlewareArgs & { event?: SlackEvent }> = ({ event, next }) => {
+export const onlyEvents: Middleware<AnyMiddlewareArgs & { event?: SlackEvent }> = async ({ event, next }) => {
   // Filter out any non-events
   if (event === undefined) {
     return;
   }
 
   // It matches so we should continue down this middleware listener chain
-  next();
+  // TODO: remove the non-null assertion operator
+  await next!();
 };
 
 /**
  * Middleware that filters out any event that isn't a view_submission or view_closed event
  */
 export const onlyViewActions: Middleware<AnyMiddlewareArgs &
-  { view?: (ViewSubmitAction | ViewClosedAction) }> = ({ view, next }) => {
+  { view?: (ViewSubmitAction | ViewClosedAction) }> = async ({ view, next }) => {
     // Filter out anything that doesn't have a view
     if (view === undefined) {
       return;
     }
 
     // It matches so we should continue down this middleware listener chain
-    next();
+  // TODO: remove the non-null assertion operator
+    await next!();
   };
 
 /**
  * Middleware that checks for matches given constraints
  */
 export function matchConstraints(
-    constraints: ActionConstraints | ViewConstraints,
+    constraints: ActionConstraints | ViewConstraints | ShortcutConstraints,
   ): Middleware<SlackActionMiddlewareArgs | SlackOptionsMiddlewareArgs | SlackViewMiddlewareArgs> {
-  return ({ payload, body, next, context }) => {
+  return async ({ payload, body, next, context }) => {
     // TODO: is putting matches in an array actually helpful? there's no way to know which of the regexps contributed
     // which matches (and in which order)
     let tempMatches: RegExpMatchArray | null;
@@ -175,28 +197,31 @@ export function matchConstraints(
       if (body.type !== constraints.type) return;
     }
 
-    next();
+  // TODO: remove the non-null assertion operator
+    await next!();
   };
 }
 
 /*
  * Middleware that filters out messages that don't match pattern
  */
-export function matchMessage(pattern: string | RegExp): Middleware<SlackEventMiddlewareArgs<'message'>> {
-  return ({ message, context, next }) => {
+export function matchMessage(
+    pattern: string | RegExp,
+  ): Middleware<SlackEventMiddlewareArgs<'message' | 'app_mention'>> {
+  return async ({ event, context, next }) => {
     let tempMatches: RegExpMatchArray | null;
 
-    if (message.text === undefined) {
+    if (event.text === undefined) {
       return;
     }
 
-    // Filter out messages that don't contain the pattern
+    // Filter out messages or app mentions that don't contain the pattern
     if (typeof pattern === 'string') {
-      if (!message.text.includes(pattern)) {
+      if (!event.text.includes(pattern)) {
         return;
       }
     } else {
-      tempMatches = message.text.match(pattern);
+      tempMatches = event.text.match(pattern);
 
       if (tempMatches !== null) {
         context['matches'] = tempMatches;
@@ -205,7 +230,8 @@ export function matchMessage(pattern: string | RegExp): Middleware<SlackEventMid
       }
     }
 
-    next();
+  // TODO: remove the non-null assertion operator
+    await next!();
   };
 }
 
@@ -213,13 +239,14 @@ export function matchMessage(pattern: string | RegExp): Middleware<SlackEventMid
  * Middleware that filters out any command that doesn't match name
  */
 export function matchCommandName(name: string): Middleware<SlackCommandMiddlewareArgs> {
-  return ({ command, next }) => {
+  return async ({ command, next }) => {
     // Filter out any commands that are not the correct command name
     if (name !== command.command) {
       return;
     }
 
-    next();
+  // TODO: remove the non-null assertion operator
+    await next!();
   };
 }
 
@@ -227,25 +254,25 @@ export function matchCommandName(name: string): Middleware<SlackCommandMiddlewar
  * Middleware that filters out any event that isn't of given type
  */
 export function matchEventType(type: string): Middleware<SlackEventMiddlewareArgs> {
-  return ({ event, next }) => {
+  return async ({ event, next }) => {
     // Filter out any events that are not the correct type
     if (type !== event.type) {
       return;
     }
 
-    next();
+  // TODO: remove the non-null assertion operator
+    await next!();
   };
 }
 
 export function ignoreSelf(): Middleware<AnyMiddlewareArgs> {
-  return (args) => {
+  return async (args) => {
     // When context does not have a botId in it, then this middleware cannot perform its job. Bail immediately.
     if (args.context.botId === undefined) {
-      args.next(contextMissingPropertyError(
+      throw new ContextMissingPropertyError(
         'botId',
         'Cannot ignore events from the app without a bot ID. Ensure authorize callback returns a botId.',
-      ));
-      return;
+      );
     }
 
     const botId = args.context.botId as string;
@@ -279,14 +306,16 @@ export function ignoreSelf(): Middleware<AnyMiddlewareArgs> {
     }
 
     // If all the previous checks didn't skip this message, then its okay to resume to next
-    args.next();
+  // TODO: remove the non-null assertion operator
+    await args.next!();
   };
 }
 
 export function subtype(subtype: string): Middleware<SlackEventMiddlewareArgs<'message'>> {
-  return ({ message, next }) => {
+  return async ({ message, next }) => {
     if (message.subtype === subtype) {
-      next();
+      // TODO: remove the non-null assertion operator
+      await next!();
     }
   };
 }
@@ -294,14 +323,13 @@ export function subtype(subtype: string): Middleware<SlackEventMiddlewareArgs<'m
 const slackLink = /<(?<type>[@#!])?(?<link>[^>|]+)(?:\|(?<label>[^>]+))?>/;
 
 export function directMention(): Middleware<SlackEventMiddlewareArgs<'message'>> {
-  return ({ message, context, next }) => {
+  return async ({ message, context, next }) => {
     // When context does not have a botUserId in it, then this middleware cannot perform its job. Bail immediately.
     if (context.botUserId === undefined) {
-      next(contextMissingPropertyError(
+      throw new ContextMissingPropertyError(
         'botUserId',
         'Cannot match direct mentions of the app without a bot user ID. Ensure authorize callback returns a botUserId.',
-      ));
-      return;
+      );
     }
 
     if (message.text === undefined) {
@@ -321,7 +349,8 @@ export function directMention(): Middleware<SlackEventMiddlewareArgs<'message'>>
       return;
     }
 
-    next();
+  // TODO: remove the non-null assertion operator
+    await next!();
   };
 }
 
@@ -337,11 +366,12 @@ function isBlockPayload(
 type CallbackIdentifiedBody =
   | InteractiveMessage
   | DialogSubmitAction
-  | MessageAction
+  | MessageShortcut
+  | GlobalShortcut
   | OptionsRequest<'interactive_message' | 'dialog_suggestion'>;
 
 function isCallbackIdentifiedBody(
-  body: SlackActionMiddlewareArgs['body'] | SlackOptionsMiddlewareArgs['body'],
+  body: SlackActionMiddlewareArgs['body'] | SlackOptionsMiddlewareArgs['body'] | SlackShortcutMiddlewareArgs['body'],
 ): body is CallbackIdentifiedBody {
   return (body as CallbackIdentifiedBody).callback_id !== undefined;
 }
@@ -359,11 +389,4 @@ function isEventArgs(
   args: AnyMiddlewareArgs,
 ): args is SlackEventMiddlewareArgs {
   return (args as SlackEventMiddlewareArgs).event !== undefined;
-}
-
-export function contextMissingPropertyError(propertyName: string, message?: string): ContextMissingPropertyError {
-  const m = message === undefined ? `Context missing property: ${propertyName}` : message;
-  const error = errorWithCode(m, ErrorCode.ContextMissingPropertyError);
-  (error as ContextMissingPropertyError).missingProperty = propertyName;
-  return error as ContextMissingPropertyError;
 }

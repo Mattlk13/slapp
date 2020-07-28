@@ -13,8 +13,8 @@ In the case that you'd like to send a message outside of a listener or you want 
 
 ```javascript
 // Listens for messages containing "knock knock" and responds with an italicized "who's there?"
-app.message('knock knock', ({ message, say }) => {
-  say(`_Who's there?_`);
+app.message('knock knock', async ({ message, say }) => {
+  await say(`_Who's there?_`);
 });
 ```
 
@@ -31,25 +31,26 @@ To explore adding rich message layouts to your app, read through [the guide on o
 
 ```javascript
 // Sends a section block with datepicker when someone reacts with a 📅 emoji
-app.event('reaction_added', ({ event, say }) => {
+app.event('reaction_added', async ({ event, say }) => {
   if (event.reaction === 'calendar') {
-    say({
+    await say({
       blocks: [{
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": "Pick a date for me to remind you"
-          },
-          "accessory": {
-            "type": "datepicker",
-            "action_id": "datepicker_remind",
-            "initial_date": "2019-04-28",
-            "placeholder": {
-              "type": "plain_text",
-              "text": "Select a date"
-             }
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
+          "text": "Pick a date for me to remind you"
+        },
+        "accessory": {
+          "type": "datepicker",
+          "action_id": "datepicker_remind",
+          "initial_date": "2019-04-28",
+          "placeholder": {
+            "type": "plain_text",
+            "text": "Select a date"
           }
-        }]});
+        }
+      }]
+    });
   }
 });
 ```

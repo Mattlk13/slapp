@@ -47,7 +47,9 @@ export function createFakeLogger(): FakeLogger {
     // NOTE: the two casts are because of a TypeScript inconsistency with tuple types and any[]. all tuple types
     // should be assignable to any[], but TypeScript doesn't think so.
     // UPDATE (Nov 2019):
-    // src/test-helpers.ts:49:15 - error TS2352: Conversion of type 'SinonSpy<any[], any>' to type 'SinonSpy<[LogLevel], void>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+    // src/test-helpers.ts:49:15 - error TS2352: Conversion of type 'SinonSpy<any[], any>' to type 'SinonSpy<[LogLevel],
+    //  void>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional,
+    // convert the expression to 'unknown' first.
     //   Property '0' is missing in type 'any[]' but required in type '[LogLevel]'.
     // 49     setLevel: sinon.fake() as SinonSpy<Parameters<Logger['setLevel']>, ReturnType<Logger['setLevel']>>,
     //                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -65,39 +67,4 @@ export function delay(ms: number = 0): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-export function wrapToResolveOnFirstCall<T extends (...args: any[]) => void>(
-  original: T,
-  timeoutMs: number = 1000,
-): { fn: (...args: Parameters<T>) => Promise<void>; promise: Promise<void>; } {
-  // tslint:disable-next-line:no-empty
-  let firstCallResolve: (value?: void | PromiseLike<void>) => void = () => { };
-  let firstCallReject: (reason?: any) => void = () => { }; // tslint:disable-line:no-empty
-
-  const firstCallPromise: Promise<void> = new Promise((resolve, reject) => {
-    firstCallResolve = resolve;
-    firstCallReject = reject;
-  });
-
-  const wrapped = async function (this: ThisParameterType<T>, ...args: Parameters<T>): Promise<void> {
-    try {
-      await original.call(this, ...args);
-      firstCallResolve();
-    } catch (error) {
-      firstCallReject(error);
-    }
-  };
-
-  setTimeout(
-    () => {
-      firstCallReject(new Error('First call to function took longer than expected'));
-    },
-    timeoutMs,
-  );
-
-  return {
-    promise: firstCallPromise,
-    fn: wrapped,
-  };
 }

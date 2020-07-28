@@ -2,10 +2,21 @@
 import 'mocha';
 import { assert } from 'chai';
 import sinon from 'sinon';
-import { ErrorCode } from '../errors';
-import { Override, delay, wrapToResolveOnFirstCall } from '../test-helpers';
+import { ErrorCode, ContextMissingPropertyError } from '../errors';
+import { Override, createFakeLogger } from '../test-helpers';
 import rewiremock from 'rewiremock';
-import { SlackEventMiddlewareArgs, NextMiddleware, Context, MessageEvent, ContextMissingPropertyError, SlackCommandMiddlewareArgs } from '../types';
+import {
+  SlackEventMiddlewareArgs,
+  NextFn,
+  Context,
+  MessageEvent,
+  SlackCommandMiddlewareArgs,
+} from '../types';
+import { onlyCommands, onlyEvents, matchCommandName, matchEventType, subtype } from './builtin';
+import { SlashCommand } from '../types/command';
+import { SlackEvent, AppMentionEvent, BotMessageEvent } from '../types/events';
+import { WebClient } from '@slack/web-api';
+import { Logger } from '@slack/logger';
 
 describe('matchMessage()', () => {
   function initializeTestCase(pattern: string | RegExp): Mocha.AsyncFunc {
@@ -21,47 +32,50 @@ describe('matchMessage()', () => {
     };
   }
 
-  function matchesPatternTestCase(pattern: string | RegExp, matchingText: string): Mocha.AsyncFunc {
+  function matchesPatternTestCase(
+      pattern: string | RegExp,
+      matchingText: string,
+      buildFakeEvent: (content: string) => SlackEvent,
+    ): Mocha.AsyncFunc {
     return async () => {
       // Arrange
       const dummyContext: DummyContext = {};
-      const { fn: next, promise: onNextFirstCall } = wrapToResolveOnFirstCall(assertions);
+      const fakeNext = sinon.fake();
       const fakeArgs = {
-        next,
-        message: createFakeMessageEvent(matchingText),
+        next: fakeNext,
+        event: buildFakeEvent(matchingText),
         context: dummyContext,
       } as unknown as MessageMiddlewareArgs;
       const { matchMessage } = await importBuiltin();
 
       // Act
       const middleware = matchMessage(pattern);
-      middleware(fakeArgs);
-      await delay();
+      await middleware(fakeArgs);
 
       // Assert
-      async function assertions(...args: any[]): Promise<void> {
-        // Assert that there is no error
-        assert.notExists(args[0]);
-        // The following assertion(s) check behavior that is only targeted at RegExp patterns
-        if (typeof pattern !== 'string') {
-          if (dummyContext.matches !== undefined) {
-            assert.lengthOf(dummyContext.matches, 1);
-          } else {
-            assert.fail();
-          }
+      assert(fakeNext.called);
+      // The following assertion(s) check behavior that is only targeted at RegExp patterns
+      if (typeof pattern !== 'string') {
+        if (dummyContext.matches !== undefined) {
+          assert.lengthOf(dummyContext.matches, 1);
+        } else {
+          assert.fail();
         }
       }
-      return onNextFirstCall;
     };
   }
 
-  function notMatchesPatternTestCase(pattern: string | RegExp, nonMatchingText: string): Mocha.AsyncFunc {
+  function notMatchesPatternTestCase(
+      pattern: string | RegExp,
+      nonMatchingText: string,
+      buildFakeEvent: (content: string) => SlackEvent,
+    ): Mocha.AsyncFunc {
     return async () => {
       // Arrange
       const dummyContext = {};
       const fakeNext = sinon.fake();
       const fakeArgs = {
-        message: createFakeMessageEvent(nonMatchingText),
+        event: buildFakeEvent(nonMatchingText),
         context: dummyContext,
         next: fakeNext,
       } as unknown as MessageMiddlewareArgs;
@@ -69,8 +83,7 @@ describe('matchMessage()', () => {
 
       // Act
       const middleware = matchMessage(pattern);
-      middleware(fakeArgs);
-      await delay();
+      await middleware(fakeArgs);
 
       // Assert
       assert(fakeNext.notCalled);
@@ -84,7 +97,7 @@ describe('matchMessage()', () => {
       const dummyContext = {};
       const fakeNext = sinon.fake();
       const fakeArgs = {
-        message: createFakeMessageEvent([{ type: 'divider' }]),
+        event: createFakeMessageEvent([{ type: 'divider' }]),
         context: dummyContext,
         next: fakeNext,
       } as unknown as MessageMiddlewareArgs;
@@ -92,8 +105,7 @@ describe('matchMessage()', () => {
 
       // Act
       const middleware = matchMessage(pattern);
-      middleware(fakeArgs);
-      await delay();
+      await middleware(fakeArgs);
 
       // Assert
       assert(fakeNext.notCalled);
@@ -106,10 +118,22 @@ describe('matchMessage()', () => {
     const matchingText = 'foobar';
     const nonMatchingText = 'bar';
     it('should initialize', initializeTestCase(pattern));
-    it('should match message events with a pattern that matches', matchesPatternTestCase(pattern, matchingText));
-    it('should filter out message events with a pattern that does not match', notMatchesPatternTestCase(
-      pattern, nonMatchingText,
-    ));
+    it(
+      'should match message events with a pattern that matches',
+      matchesPatternTestCase(pattern, matchingText, createFakeMessageEvent),
+    );
+    it(
+      'should match app_mention events with a pattern that matches',
+      matchesPatternTestCase(pattern, matchingText, createFakeAppMentionEvent),
+    );
+    it(
+      'should filter out message events with a pattern that does not match',
+      notMatchesPatternTestCase(pattern, nonMatchingText, createFakeMessageEvent),
+    );
+    it(
+      'should filter out app_mention events with a pattern that does not match',
+      notMatchesPatternTestCase(pattern, nonMatchingText, createFakeAppMentionEvent),
+    );
     it('should filter out message events which do not have text (block kit)', noTextMessageTestCase(pattern));
   });
 
@@ -118,10 +142,22 @@ describe('matchMessage()', () => {
     const matchingText = 'foobar';
     const nonMatchingText = 'bar';
     it('should initialize', initializeTestCase(pattern));
-    it('should match message events with a pattern that matches', matchesPatternTestCase(pattern, matchingText));
-    it('should filter out message events with a pattern that does not match', notMatchesPatternTestCase(
-      pattern, nonMatchingText,
-    ));
+    it(
+      'should match message events with a pattern that matches',
+      matchesPatternTestCase(pattern, matchingText, createFakeMessageEvent),
+    );
+    it(
+      'should match app_mention events with a pattern that matches',
+      matchesPatternTestCase(pattern, matchingText, createFakeAppMentionEvent),
+    );
+    it(
+      'should filter out message events with a pattern that does not match',
+      notMatchesPatternTestCase(pattern, nonMatchingText, createFakeMessageEvent),
+    );
+    it(
+      'should filter out app_mention events with a pattern that does not match',
+      notMatchesPatternTestCase(pattern, nonMatchingText, createFakeAppMentionEvent),
+    );
     it('should filter out message events which do not have text (block kit)', noTextMessageTestCase(pattern));
   });
 });
@@ -129,9 +165,8 @@ describe('matchMessage()', () => {
 describe('directMention()', () => {
   it('should bail when the context does not provide a bot user ID', async () => {
     // Arrange
-    const { fn: next, promise: onNextFirstCall } = wrapToResolveOnFirstCall(assertions);
     const fakeArgs = {
-      next,
+      next: () => Promise.resolve(),
       message: createFakeMessageEvent(),
       context: {},
     } as unknown as MessageMiddlewareArgs;
@@ -139,26 +174,27 @@ describe('directMention()', () => {
 
     // Act
     const middleware = directMention();
-    middleware(fakeArgs);
-    await delay();
 
-    // Assert
-    async function assertions(...args: any[]): Promise<void> {
-      const firstArg = args[0];
-      assert.instanceOf(firstArg, Error);
-      assert.propertyVal(firstArg, 'code', ErrorCode.ContextMissingPropertyError);
-      assert.propertyVal(firstArg, 'missingProperty', 'botUserId');
+    let error;
+
+    try {
+      await middleware(fakeArgs);
+    } catch (err) {
+      error = err;
     }
-    return onNextFirstCall;
+
+    assert.instanceOf(error, Error);
+    assert.propertyVal(error, 'code', ErrorCode.ContextMissingPropertyError);
+    assert.propertyVal(error, 'missingProperty', 'botUserId');
   });
 
   it('should match message events that mention the bot user ID at the beginning of message text', async () => {
     // Arrange
     const fakeBotUserId = 'B123456';
     const messageText = `<@${fakeBotUserId}> hi`;
-    const { fn: next, promise: onNextFirstCall } = wrapToResolveOnFirstCall(assertions);
+    const fakeNext = sinon.fake();
     const fakeArgs = {
-      next,
+      next: fakeNext,
       message: createFakeMessageEvent(messageText),
       context: { botUserId: fakeBotUserId },
     } as unknown as MessageMiddlewareArgs;
@@ -166,15 +202,10 @@ describe('directMention()', () => {
 
     // Act
     const middleware = directMention();
-    middleware(fakeArgs);
-    await delay();
+    await middleware(fakeArgs);
 
     // Assert
-    async function assertions(...args: any[]): Promise<void> {
-      // Assert that there is no error
-      assert.notExists(args[0]);
-    }
-    return onNextFirstCall;
+    assert(fakeNext.called);
   });
 
   it('should not match message events that do not mention the bot user ID', async () => {
@@ -191,8 +222,7 @@ describe('directMention()', () => {
 
     // Act
     const middleware = directMention();
-    middleware(fakeArgs);
-    await delay();
+    await middleware(fakeArgs);
 
     // Assert
     assert(fakeNext.notCalled);
@@ -212,8 +242,7 @@ describe('directMention()', () => {
 
     // Act
     const middleware = directMention();
-    middleware(fakeArgs);
-    await delay();
+    await middleware(fakeArgs);
 
     // Assert
     assert(fakeNext.notCalled);
@@ -232,8 +261,7 @@ describe('directMention()', () => {
 
     // Act
     const middleware = directMention();
-    middleware(fakeArgs);
-    await delay();
+    await middleware(fakeArgs);
 
     // Assert
     assert(fakeNext.notCalled);
@@ -253,8 +281,7 @@ describe('directMention()', () => {
 
     // Act
     const middleware = directMention();
-    middleware(fakeArgs);
-    await delay();
+    await middleware(fakeArgs);
 
     // Assert
     assert(fakeNext.notCalled);
@@ -264,30 +291,33 @@ describe('directMention()', () => {
 describe('ignoreSelf()', () => {
   it('should handle context missing error', async () => {
     // Arrange
-    const fakeNext = sinon.fake();
+    const fakeNext = sinon.fake.resolves(null);
     const fakeBotUserId = undefined;
     const fakeArgs = {
       next: fakeNext,
-      context: { botUserId: fakeBotUserId },
+      context: { botUserId: fakeBotUserId, botId: fakeBotUserId },
     } as unknown as MemberJoinedOrLeftChannelMiddlewareArgs;
 
-    const { ignoreSelf: getIgnoreSelfMiddleware, contextMissingPropertyError } = await importBuiltin();
+    const { ignoreSelf: getIgnoreSelfMiddleware } = await importBuiltin();
 
     // Act
     const middleware = getIgnoreSelfMiddleware();
-    middleware(fakeArgs);
-    await delay();
+
+    let error;
+    try {
+      await middleware(fakeArgs);
+    } catch (err) {
+      error = err;
+    }
 
     // Assert
-    const expectedError = contextMissingPropertyError(
+    const expectedError = new ContextMissingPropertyError(
       'botId',
       'Cannot ignore events from the app without a bot ID. Ensure authorize callback returns a botId.',
     );
 
-    const contextMissingError: ContextMissingPropertyError = fakeNext.getCall(0).lastArg;
-
-    assert.equal(contextMissingError.code, expectedError.code);
-    assert.equal(contextMissingError.missingProperty, expectedError.missingProperty);
+    assert.equal(error.code, expectedError.code);
+    assert.equal(error.missingProperty, expectedError.missingProperty);
   });
 
   it('should immediately call next(), because incoming middleware args don\'t contain event', async () => {
@@ -296,7 +326,7 @@ describe('ignoreSelf()', () => {
     const fakeBotUserId = 'BUSER1';
     const fakeArgs = {
       next: fakeNext,
-      context: { botUserId: fakeBotUserId },
+      context: { botUserId: fakeBotUserId, botId: fakeBotUserId },
       command: {
         command: '/fakeCommand',
       },
@@ -306,8 +336,7 @@ describe('ignoreSelf()', () => {
 
     // Act
     const middleware = getIgnoreSelfMiddleware();
-    middleware(fakeArgs);
-    await delay();
+    await middleware(fakeArgs);
 
     // Assert
     assert(fakeNext.calledOnce);
@@ -337,8 +366,7 @@ describe('ignoreSelf()', () => {
 
     // Act
     const middleware = getIgnoreSelfMiddleware();
-    middleware(fakeArgs);
-    await delay();
+    await middleware(fakeArgs);
 
     // Assert
     assert(fakeNext.notCalled);
@@ -361,8 +389,7 @@ describe('ignoreSelf()', () => {
 
     // Act
     const middleware = getIgnoreSelfMiddleware();
-    middleware(fakeArgs);
-    await delay();
+    await middleware(fakeArgs);
 
     // Assert
     assert(fakeNext.notCalled);
@@ -385,8 +412,7 @@ describe('ignoreSelf()', () => {
 
     // Act
     const middleware = getIgnoreSelfMiddleware();
-    middleware(fakeArgs);
-    await delay();
+    await middleware(fakeArgs);
 
     // Assert
     assert(fakeNext.notCalled);
@@ -413,12 +439,233 @@ describe('ignoreSelf()', () => {
 
     // Act
     const middleware = getIgnoreSelfMiddleware();
-    listOfFakeArgs.forEach(middleware);
-
-    await delay();
+    await Promise.all(listOfFakeArgs.map(middleware));
 
     // Assert
     assert.equal(fakeNext.callCount, listOfFakeArgs.length);
+  });
+});
+
+describe('onlyCommands', () => {
+  const logger = createFakeLogger();
+  const client = new WebClient(undefined, { logger, slackApiUrl: undefined });
+
+  it('should detect valid requests', async () => {
+    const payload: SlashCommand = { ...validCommandPayload };
+    const fakeNext = sinon.fake();
+    await onlyCommands({
+      logger,
+      client,
+      payload,
+      command: payload,
+      body: payload,
+      say: sayNoop,
+      respond: noop,
+      ack: noop,
+      next: fakeNext,
+      context: {},
+    });
+    assert.isTrue(fakeNext.called);
+  });
+
+  it('should skip other requests', async () => {
+    const payload: any = {};
+    const fakeNext = sinon.fake();
+    await onlyCommands({
+      logger,
+      client,
+      payload,
+      action: payload,
+      command: undefined,
+      body: payload,
+      say: sayNoop,
+      respond: noop,
+      ack: noop,
+      next: fakeNext,
+      context: {},
+    });
+    assert.isTrue(fakeNext.notCalled);
+  });
+});
+
+describe('matchCommandName', () => {
+  const logger = createFakeLogger();
+  const client = new WebClient(undefined, { logger, slackApiUrl: undefined });
+
+  function buildArgs(fakeNext: NextFn): SlackCommandMiddlewareArgs & MiddlewareCommonArgs {
+    const payload: SlashCommand = { ...validCommandPayload };
+    return {
+      payload,
+      logger,
+      client,
+      command: payload,
+      body: payload,
+      say: sayNoop,
+      respond: noop,
+      ack: noop,
+      next: fakeNext,
+      context: {},
+    };
+  }
+
+  it('should detect valid requests', async () => {
+    const fakeNext = sinon.fake();
+    await matchCommandName('/hi')(buildArgs(fakeNext));
+    assert.isTrue(fakeNext.called);
+  });
+
+  it('should skip other requests', async () => {
+    const fakeNext = sinon.fake();
+    await matchCommandName('/hello')(buildArgs(fakeNext));
+    assert.isTrue(fakeNext.notCalled);
+  });
+});
+
+describe('onlyEvents', () => {
+
+  const logger = createFakeLogger();
+  const client = new WebClient(undefined, { logger, slackApiUrl: undefined });
+
+  it('should detect valid requests', async () => {
+    const fakeNext = sinon.fake();
+    const args: SlackEventMiddlewareArgs<'app_mention'> & { event?: SlackEvent } = {
+      payload: appMentionEvent,
+      event: appMentionEvent,
+      message: null as never, // a bit hackey to sartisfy TS compiler
+      body: {
+        token: 'token-value',
+        team_id: 'T1234567',
+        api_app_id: 'A1234567',
+        event: appMentionEvent,
+        type: 'event_callback',
+        event_id: 'event-id-value',
+        event_time: 123,
+        authed_users: [],
+      },
+      say: sayNoop,
+    };
+    await onlyEvents({
+      logger,
+      client,
+      next: fakeNext,
+      context: {},
+      ...args,
+    });
+    assert.isTrue(fakeNext.called);
+  });
+
+  it('should skip other requests', async () => {
+    const payload: SlashCommand = { ...validCommandPayload };
+    const fakeNext = sinon.fake();
+    await onlyEvents({
+      logger,
+      client,
+      payload,
+      command: payload,
+      body: payload,
+      say: sayNoop,
+      respond: noop,
+      ack: noop,
+      next: fakeNext,
+      context: {},
+    });
+    assert.isFalse(fakeNext.called);
+  });
+});
+
+describe('matchEventType', () => {
+  const logger = createFakeLogger();
+  const client = new WebClient(undefined, { logger, slackApiUrl: undefined });
+
+  function buildArgs(): SlackEventMiddlewareArgs<'app_mention'> & { event?: SlackEvent } {
+    return {
+      payload: appMentionEvent,
+      event: appMentionEvent,
+      message: null as never, // a bit hackey to sartisfy TS compiler
+      body: {
+        token: 'token-value',
+        team_id: 'T1234567',
+        api_app_id: 'A1234567',
+        event: appMentionEvent,
+        type: 'event_callback',
+        event_id: 'event-id-value',
+        event_time: 123,
+        authed_users: [],
+      },
+      say: sayNoop,
+    };
+  }
+
+  it('should detect valid requests', async () => {
+    const fakeNext = sinon.fake();
+    await matchEventType('app_mention')({
+      logger,
+      client,
+      next: fakeNext,
+      context: {},
+      ...buildArgs(),
+    });
+    assert.isTrue(fakeNext.called);
+  });
+
+  it('should skip other requests', async () => {
+    const fakeNext = sinon.fake();
+    await matchEventType('app_home_opened')({
+      logger,
+      client,
+      next: fakeNext,
+      context: {},
+      ...buildArgs(),
+    });
+    assert.isFalse(fakeNext.called);
+  });
+});
+
+describe('subtype', () => {
+  const logger = createFakeLogger();
+  const client = new WebClient(undefined, { logger, slackApiUrl: undefined });
+
+  function buildArgs(): SlackEventMiddlewareArgs<'message'> & { event?: SlackEvent } {
+    return {
+      payload: botMessageEvent,
+      event: botMessageEvent,
+      message: botMessageEvent,
+      body: {
+        token: 'token-value',
+        team_id: 'T1234567',
+        api_app_id: 'A1234567',
+        event: botMessageEvent,
+        type: 'event_callback',
+        event_id: 'event-id-value',
+        event_time: 123,
+        authed_users: [],
+      },
+      say: sayNoop,
+    };
+  }
+
+  it('should detect valid requests', async () => {
+    const fakeNext = sinon.fake();
+    await subtype('bot_message')({
+      logger,
+      client,
+      next: fakeNext,
+      context: {},
+      ...buildArgs(),
+    });
+    assert.isTrue(fakeNext.called);
+  });
+
+  it('should skip other requests', async () => {
+    const fakeNext = sinon.fake();
+    await subtype('me_message')({
+      logger,
+      client,
+      next: fakeNext,
+      context: {},
+      ...buildArgs(),
+    });
+    assert.isFalse(fakeNext.called);
   });
 });
 
@@ -428,13 +675,19 @@ interface DummyContext {
   matches?: RegExpExecArray;
 }
 
-type MessageMiddlewareArgs = SlackEventMiddlewareArgs<'message'> & { next: NextMiddleware, context: Context };
-type TokensRevokedMiddlewareArgs = SlackEventMiddlewareArgs<'tokens_revoked'> & { next: NextMiddleware, context: Context };
+interface MiddlewareCommonArgs {
+  next: NextFn;
+  context: Context;
+  logger: Logger;
+  client: WebClient;
+}
+type MessageMiddlewareArgs = SlackEventMiddlewareArgs<'message'> & MiddlewareCommonArgs;
+type TokensRevokedMiddlewareArgs = SlackEventMiddlewareArgs<'tokens_revoked'> & MiddlewareCommonArgs;
 
 type MemberJoinedOrLeftChannelMiddlewareArgs = SlackEventMiddlewareArgs<'member_joined_channel' | 'member_left_channel'>
-  & { next: NextMiddleware, context: Context };
+  & MiddlewareCommonArgs;
 
-type CommandMiddlewareArgs = SlackCommandMiddlewareArgs & { next: NextMiddleware; context: Context };
+type CommandMiddlewareArgs = SlackCommandMiddlewareArgs & MiddlewareCommonArgs;
 
 async function importBuiltin(
   overrides: Override = {},
@@ -456,3 +709,51 @@ function createFakeMessageEvent(content: string | MessageEvent['blocks'] = ''): 
   }
   return event as MessageEvent;
 }
+
+function createFakeAppMentionEvent(text: string = ''): AppMentionEvent {
+  const event: Partial<AppMentionEvent> = {
+    text,
+    type: 'app_mention',
+    user: 'USER_ID',
+    ts: 'MESSAGE_ID',
+    channel: 'CHANNEL_ID',
+    event_ts: 'MESSAGE_ID',
+  };
+  return event as AppMentionEvent;
+}
+
+const validCommandPayload: SlashCommand = {
+  token: 'token-value',
+  command: '/hi',
+  text: 'Steve!',
+  response_url: 'https://hooks.slack.com/foo/bar',
+  trigger_id: 'trigger-id-value',
+  user_id: 'U1234567',
+  user_name: 'steve',
+  team_id: 'T1234567',
+  team_domain: 'awesome-eng-team',
+  channel_id: 'C1234567',
+  channel_name: 'random',
+};
+
+const appMentionEvent: AppMentionEvent = {
+  type: 'app_mention',
+  user: 'U1234567',
+  text: 'this is my message',
+  ts: '123.123',
+  channel: 'C1234567',
+  event_ts: '123.123',
+};
+
+const botMessageEvent: BotMessageEvent & MessageEvent = {
+  type: 'message',
+  subtype: 'bot_message',
+  channel: 'C1234567',
+  user: 'U1234567',
+  ts: '123.123',
+  text: 'this is my message',
+  bot_id: 'B1234567',
+};
+
+const noop = () => Promise.resolve(undefined);
+const sayNoop = () => Promise.resolve({ ok: true });

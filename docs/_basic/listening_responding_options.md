@@ -2,11 +2,11 @@
 title: Listening and responding to options
 lang: en
 slug: options
-order: 12
+order: 13
 ---
 
 <div class="section-content">
-The `option()` method listens for incoming option request payloads from Slack. [Similar to `actions()`](#action-listening),
+The `options()` method listens for incoming option request payloads from Slack. [Similar to `action()`](#action-listening),
 an `action_id` or constraints object is required.
 
 While it's recommended to use `action_id` for `external_select` menus, dialogs do not yet support Block Kit so you'll have to 
@@ -20,7 +20,7 @@ To respond to options requests, you'll need to `ack()` with valid options. Both 
 app.options('external_action', async ({ options, ack }) => {
   // Get information specific to a team or channel
   const results = await db.get(options.team.id);
-  
+
   if (results) {
     let options = [];
     // Collect information in options array to send in Slack ack response
@@ -34,11 +34,11 @@ app.options('external_action', async ({ options, ack }) => {
       });
     }
 
-    ack({
+    await ack({
       "options": options
     });
   } else {
-    ack();
+    await ack();
   }
 });
 ```

@@ -8,10 +8,10 @@ permalink: /tutorial/getting-started
 redirect_from:
   - /getting-started
 ---
-# Getting started with Bolt
+# Getting started with Bolt for JavaScript
 
 <div class="section-content">
-This guide is meant to walk you through getting up and running with a Slack app using Bolt. Along the way, we’ll create a new Slack app, set up your local environment, and develop an app that listens and responds to messages from a Slack workspace.
+This guide is meant to walk you through getting up and running with a Slack app using Bolt for JavaScript. Along the way, we’ll create a new Slack app, set up your local environment, and develop an app that listens and responds to messages from a Slack workspace.
 </div> 
 
 ---
@@ -34,21 +34,19 @@ Look around, add an app icon and description, and then let's start configuring y
 ### Tokens and installing apps
 Slack apps use [OAuth to manage access to Slack's APIs](https://api.slack.com/docs/oauth). When an app is installed, you'll receive a token that the app can use to call API methods. 
 
-There are two token types available to a Slack app: user (`xoxp`) and bot (`xoxb`) tokens. User tokens allow you to call API methods on behalf of users after they install or authenticate the app. There may be several user tokens for a single workspace. Bot tokens are granted once in every workspace where someone installs the app, though they require adding a bot user to your app. The bot token your app uses will be the same no matter which user performed the installation.
+There are two token types available to a Slack app: user (`xoxp`) and bot (`xoxb`) tokens. User tokens allow you to call API methods on behalf of users after they install or authenticate the app. There may be several user tokens for a single workspace. Bot tokens are associated with bot users, and are only granted once in a workspace where someone installs the app. The bot token your app uses will be the same no matter which user performed the installation. Bot tokens are the token type that _most_ apps use.
 
 For brevity, we're going to use bot tokens for this guide.
 
-To add a bot user, click **Bot Users** on the left sidebar and then **Add A Bot User**. Give it a display name and username, then click **Add Bot User**.
+Navigate to the **OAuth & Permissions** on the left sidebar and scroll down to the **Bot Token Scopes** section. Click **Add an OAuth Scope**.
 
-Now that you have a bot user with permission to send messages to Slack, let's install the app to your workspace.
+For now, we'll just add one scope: [`chat:write`](https://api.slack.com/scopes/chat:write). This grants your app the permission to post messages in channels it's a member of.
 
-Click **Install App** on the left sidebar and click the **Install App to Workspace** button at the top of the page. You'll see a screen that details what permissions the app is requesting, which correlate to the scopes applied to your app's OAuth token(s).
+Scroll up to the top of the OAuth & Permissions page and click **Install App to Workspace**. You'll be led through Slack's OAuth UI, where you should allow your app to be installed to your development workspace.
 
-Once you authorize the installation, you'll land on the **OAuth & Permissions** page.
+Once you authorize the installation, you'll land on the **OAuth & Permissions** page and see a **Bot User OAuth Access Token**.
 
-![OAuth Tokens](../assets/bot-token.png "OAuth Tokens")
-
-You'll see two tokens. For now, we'll just use the `xoxb` bot token. (If you scroll down this page to the **Scopes** section, you'll see the various scopes you can add to the `xoxp` token.)
+![OAuth Tokens](../assets/bot-token.png "Bot OAuth Token")
 
 > 💡 Treat your token like a password and [keep it safe](https://api.slack.com/docs/oauth-safety). Your app uses it to post and retrieve information from Slack workspaces.
 
@@ -65,7 +63,7 @@ npm init
 
 You’ll be prompted with a series of questions to describe your new project (you can accept the defaults by hitting <kbd>Enter</kbd> on each prompt if you aren’t picky). After you’re done, you’ll have a new `package.json` file in your directory.
 
-Before we install the Bolt package to your new project, let's save the bot token and signing secret that was generated when you configured your app. These should be stored as environment variables and should *not* be saved in version control.
+Before we install the Bolt for JavaScript package to your new project, let's save the bot token and signing secret that was generated when you configured your app. These should be stored as environment variables and should *not* be saved in version control.
 
 1. **Copy your Signing Secret from the Basic Information page** and then store it in a new environment variable. The following example works on Linux and MacOS; but [similar commands are available on Windows](https://superuser.com/questions/212150/how-to-set-env-variable-in-windows-cmd-line/212153#212153).
 
@@ -147,6 +145,8 @@ The output should show a generated URL that you can use (we recommend the one th
 
 Now you have a public-facing URL for your app that tunnels to your local machine. The Request URL that you use in your app configuration is composed of your public-facing URL combined with the URL your app is listening on. By default, Bolt apps listen at `/slack/events` so our full request URL would be `https://8e8ec2d7.ngrok.io/slack/events`.
 
+> ⚙️Bolt uses the `/slack/events` endpoint to listen to all incoming requests (whether shortcuts, events, or interactivity payloads). When configuring endpoints within your app configuration, you'll append `/slack/events` to all request URLs.
+
 Under the **Enable Events** switch in the **Request URL** box, go ahead and paste in your URL. As long as your Bolt app is still running, your URL should become verified.
 
 After your request URL is verified, scroll down to **Subscribe to Bot Events**. There are four events related to messages: `message.channels` (listens for messages in public channels), `message.groups` (listens for messages in private channels), `message.im` (listens for messages in the App Home/DM space), and `message.mpim` (listens for messages in multi-person DMs).
@@ -169,9 +169,9 @@ const app = new App({
 });
 
 // Listens to incoming messages that contain "hello"
-app.message('hello', ({ message, say }) => {
+app.message('hello', async ({ message, say }) => {
   // say() sends a message to the channel where the event was triggered
-  say(`Hey there <@${message.user}>!`);
+  await say(`Hey there <@${message.user}>!`);
 });
 
 (async () => {
@@ -190,7 +190,7 @@ This is a basic example, but it gives you a place to start customizing your app 
 
 ### Sending and responding to actions
 
-To use features like buttons, select menus, datepickers, dialogs, and message actions, you’ll need to enable interactivity. Similar to events, you'll need to specify a URL for Slack to send the action (such as *user clicked a button*).
+To use features like buttons, select menus, datepickers, dialogs, and shortcuts, you’ll need to enable interactivity. Similar to events, you'll need to specify a URL for Slack to send the action (such as *user clicked a button*).
 
 Back on your app configuration page, click on **Interactive Components** on the left side. You'll see that there's another **Request URL** box.
 
@@ -213,26 +213,27 @@ const app = new App({
 });
 
 // Listens to incoming messages that contain "hello"
-app.message('hello', ({ message, say }) => {
+app.message('hello', async ({ message, say }) => {
   // say() sends a message to the channel where the event was triggered
-  say({
+  await say({
     blocks: [
-    {
-	    "type": "section",
-      "text": {
-        "type": "mrkdwn",
-        "text": `Hey there <@${message.user}>!`
-      },
-      "accessory": {
-        "type": "button",
+      {
+        "type": "section",
         "text": {
-          "type": "plain_text",
-          "text": "Click Me"
+          "type": "mrkdwn",
+          "text": `Hey there <@${message.user}>!`
         },
-        "action_id": "button_click"
+        "accessory": {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Click Me"
+          },
+          "action_id": "button_click"
+        }
       }
-     }
-    ]
+    ],
+    text: `Hey there <@${message.user}>!`
   });
 });
 
@@ -263,9 +264,9 @@ const app = new App({
 });
 
 // Listens to incoming messages that contain "hello"
-app.message('hello', ({ message, say }) => {
+app.message('hello', async ({ message, say }) => {
   // say() sends a message to the channel where the event was triggered
-  say({
+  await say({
     blocks: [
       {
         "type": "section",
@@ -282,14 +283,15 @@ app.message('hello', ({ message, say }) => {
           "action_id": "button_click"
         }
       }
-    ]
+    ],
+    text: `Hey there <@${message.user}>!`
   });
 });
 
-app.action('button_click', ({ body, ack, say }) => {
+app.action('button_click', async ({ body, ack, say }) => {
   // Acknowledge the action
-  ack();
-  say(`<@${body.user.id}> clicked the button`);
+  await ack();
+  await say(`<@${body.user.id}> clicked the button`);
 });
 
 (async () => {
@@ -305,9 +307,9 @@ You can see that we used the `action_id` to add a listener for our button action
 ---
 
 ### Next steps
-You just built your first Bolt app! 🎉
+You just built your first Bolt for JavaScript app! 🎉
 
-Now that you have a basic app up and running, you can start exploring the parts of Bolt that will make your app stand out. Here are some ideas about where to look next:
+Now that you have a basic app up and running, you can start exploring how to make your Bolt app stand out. Here are some ideas about what to explore next:
 
 * Read through the [Basic concepts](https://slack.dev/bolt#basic) to learn about the different methods and features your Bolt app has access to.
 

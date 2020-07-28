@@ -6,21 +6,21 @@ order: 8
 ---
 
 <div class="section-content">
-レシーバーは、Slack から送信されたイベントを処理およびパースして発行するので、Bolt アプリがそのイベントにコンテキストを追加し、アプリのリスナーに渡すことができます。レシーバーは、レシーバーのインターフェイスに準拠している必要があります。
+レシーバーは、Slack からのイベントを受け付けてパースした後、それを Bolt アプリに伝える責務を担っています。Bolt アプリは、`context` 情報やリスナーへのイベントの引き渡しを行います。レシーバーの実装は `Receiver` インターフェイスに準拠している必要があります。
 
-| メソッド      | パラメーター                       | 戻り値の型    |
+| メソッド      | パラメーター                     | 戻り値の型   |
 |--------------|----------------------------------|-------------|
-| `on()`       | `type: string`, `listener: fn()` | `unknown`   |
+| `init()`     | `app: App`                       | `unknown`   |
 | `start()`    | None                             | `Promise`   |
 | `stop()`     | None                             | `Promise`   |
 
-Bolt アプリでは `on()` が 2 回呼び出されます。
-* `Receiver.on('message', listener)` は、解析されたすべての着信リクエストを `onIncomingEvent()` にルーティングする必要があります。これは、Bolt アプリでは `this.receiver.on('message', message => this.onIncomingEvent(message))` として呼び出されます。
-* `Receiver.on('error', listener)` は、エラーをグローバルエラーハンドラーにルーティングする必要があります。これは、Bolt アプリでは `this.receiver.on('error', error => this.onGlobalError(error))` として呼び出されます。
+`init()` メソッドは Bolt for JavaScript アプリが生成されたときに呼び出されます。このメソッドはレシーバーに `App` インスタンスへの参照を与えます。レシーバーはこれを保持して、イベント受信時に呼び出します。
 
-Bolt アプリを初期化するときにカスタムレシーバーをコンストラクタに渡すことで、そのカスタムレシーバーを使用できます。ここで紹介するのは、基本的なカスタムレシーバーです。
+* `await app.processEvent(event)` は Slack から送信されてくるイベントを受け取るたびに呼び出されます。ハンドリングされなかったエラーが発生した場合はそれを throw します。
 
-レシーバーについて詳しくは、[組み込み Express レシーバーのソースコード](https://github.com/slackapi/bolt/blob/master/src/ExpressReceiver.ts)をお読みください。
+カスタムのレシーバーを使用する場合は、それを `App` のコンストラクターに渡します。ここで紹介しているコード例は、基本的なカスタムレシーバーの実装例です。
+
+レシーバーについてより深く知りたい場合は、[組み込み `ExpressReceiver` のソースコード](https://github.com/slackapi/bolt-js/blob/master/src/ExpressReceiver.ts)を参照してください。
 </div>
 
 ```javascript
@@ -40,6 +40,10 @@ class simpleReceiver extends EventEmitter {
       this.app.post(endpoint, this.requestHandler.bind(this));
     }
   }
+  
+  init(app) {
+    this.bolt = app;
+  }
 
   start(port) {
     return new Promise((resolve, reject) => {
@@ -47,7 +51,7 @@ class simpleReceiver extends EventEmitter {
         this.server.listen(port, () => {
           resolve(this.server);
         });
-      } catch(error) {
+      } catch (error) {
         reject(error);
       }
     });
@@ -65,21 +69,30 @@ class simpleReceiver extends EventEmitter {
     })
   }
 
-  requestHandler(req, res) {
+  async requestHandler(req, res) {
+    let ackCalled = false;
     // 着信リクエストをパースするparseBody 関数があると仮定
     const parsedReq = parseBody(req);
     const event = {
       body: parsedReq.body,
       // レシーバーが確認作業に重要
       ack: (response) => {
-        if (!response) {
+        if (ackCalled) {
+          return;
+        }
+        
+        if (response instanceof Error) {
+          res.status(500).send();
+        } else if (!response) {
           res.send('')
         } else {
           res.send(response);
         }
+        
+        ackCalled = true;
       }
     };
-    this.emit('message', event);
+    await this.bolt.processEvent(event);
   }
 }
 ```
